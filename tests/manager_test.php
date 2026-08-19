@@ -32,6 +32,8 @@ final class manager_test extends \advanced_testcase {
      *
      * @return void
      */
+    // Moodle 4.5's CodeSniffer predates PHPUnit attribute-based coverage metadata.
+    // phpcs:ignore moodle.PHPUnit.TestCaseCovers.Missing
     public function test_supported_timezone_validation(): void {
         $this->assertTrue(manager::is_supported_timezone('Australia/Sydney'));
         $this->assertTrue(manager::is_supported_timezone('Europe/London'));
