@@ -5,15 +5,23 @@
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle. If not, see <https://www.gnu.org/licenses/>.
 
 namespace local_autobrowsertimezone\local;
-
-defined('MOODLE_INTERNAL') || die();
 
 /**
  * Runtime and profile update logic.
  *
- * @package local_autobrowsertimezone
+ * @package    local_autobrowsertimezone
+ * @copyright  2026 LightMoonProjects
+ * @license    https://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 final class manager {
     /**
@@ -44,8 +52,52 @@ final class manager {
             return false;
         }
 
-        // Match Moodle core's forced-timezone precedence: anything other than 99 overrides user timezones.
+        // Never mutate the impersonated user's profile using the operator's browser timezone.
+        if (isloggedinas()) {
+            return false;
+        }
+
+        // Remote MNet profiles are managed by their home Moodle site.
+        if (is_mnet_remote_user($USER)) {
+            return false;
+        }
+
+        // Respect authentication-plugin ownership and locking of the core timezone profile field.
+        if (!self::can_update_timezone_for_auth_plugin()) {
+            return false;
+        }
+
+        // Moodle's forced timezone deliberately overrides individual profile timezone settings.
         if (isset($CFG->forcetimezone) && $CFG->forcetimezone != 99) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Whether the current authentication plugin allows this timezone field to be changed.
+     *
+     * This mirrors the lock handling used by Moodle's own user edit form.
+     *
+     * @return bool
+     */
+    private static function can_update_timezone_for_auth_plugin(): bool {
+        global $USER;
+
+        $authplugin = get_auth_plugin((string)($USER->auth ?? 'manual'));
+
+        if (!$authplugin->can_edit_profile()) {
+            return false;
+        }
+
+        $lock = (string)($authplugin->config->field_lock_timezone ?? 'unlocked');
+
+        if ($lock === 'locked') {
+            return false;
+        }
+
+        if ($lock === 'unlockedifempty' && (string)($USER->timezone ?? '') !== '') {
             return false;
         }
 
@@ -92,7 +144,7 @@ final class manager {
      * Update the current user's timezone.
      *
      * @param string $timezone Browser-provided timezone.
-     * @return array{changed:bool,timezone:string,reason:string}
+     * @return array{changed: bool, timezone: string, reason: string}
      */
     public static function update_current_user_timezone(string $timezone): array {
         global $CFG, $USER;
@@ -128,7 +180,7 @@ final class manager {
             'timezone' => $timezone,
         ];
 
-        // Do not touch the password; trigger the standard user_updated event.
+        // Do not touch the password; trigger Moodle's standard user_updated event.
         user_update_user($update, false, true);
 
         // Keep the current request's user object consistent with the database.

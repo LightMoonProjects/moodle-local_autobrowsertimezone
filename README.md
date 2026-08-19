@@ -1,39 +1,41 @@
-# Automatic Browser Timezone
+# Automatic browser timezone
 
-`local_autobrowsertimezone` keeps a logged-in Moodle user's profile timezone aligned with the timezone reported by their browser/device.
+`local_autobrowsertimezone` keeps a logged-in Moodle user's profile timezone aligned with the IANA timezone reported by their web browser/device.
 
-It intentionally does **not** use GPS, IP geolocation, or a third-party timezone API. The browser reports an IANA timezone such as `Australia/Sydney` using `Intl.DateTimeFormat().resolvedOptions().timeZone`.
+The plugin deliberately does **not** use GPS, IP geolocation, MaxMind, or a third-party timezone API. The browser timezone is obtained locally with `Intl.DateTimeFormat().resolvedOptions().timeZone` and is only sent back to the same Moodle site when it differs from the user's profile timezone.
 
 ## Why
 
-Moodle formats user-facing dates with the user's configured timezone. Keeping the profile timezone current means core Moodle date displays and plugins which use Moodle's user date APIs (including Secure Video watermarks) can show the user's local time correctly.
+Moodle formats user-facing dates using the user's configured timezone. Keeping that profile field current improves date/time display across Moodle and for plugins that correctly use Moodle's date APIs.
 
 ## Behaviour
 
-When enabled:
+When the plugin is enabled:
 
-1. A logged-in Moodle page loads.
-2. The browser reports its current IANA timezone.
-3. If it differs from the user's Moodle profile timezone, Moodle validates the timezone against its supported timezone list.
-4. The current user's profile timezone is updated.
+1. An eligible logged-in Moodle web page loads.
+2. The browser reports its current IANA timezone, for example `Australia/Sydney`.
+3. If it differs from the user's Moodle profile timezone, Moodle validates the value against its supported timezone list.
+4. The current user's existing Moodle profile timezone is updated through Moodle's user API.
 5. By default the page reloads once so server-rendered dates immediately use the new timezone.
 
-The plugin does nothing for guests, suspended/deleted users, during installation, or when Moodle has a forced site timezone configured.
+The plugin does not change a timezone when Moodle has a forced timezone configured. It also respects authentication-plugin profile ownership/locking for the timezone field, and skips guests, suspended/deleted users, MNet remote users, CLI requests, and sessions where an administrator is logged in as another user.
 
-## Requirements
+## Requirements and supported Moodle versions
 
-- Moodle 4.4 or later.
-- A browser with `Intl.DateTimeFormat` support.
+- Moodle **4.5 through 5.2**.
+- A web browser with `Intl.DateTimeFormat` timezone support.
+
+Moodle App behaviour is not currently advertised as supported; this initial release targets Moodle's browser interface.
 
 ## Installation
 
-Install the repository as:
+Install the plugin in:
 
 ```text
 local/autobrowsertimezone
 ```
 
-Then run the Moodle upgrade and visit:
+Then complete the Moodle upgrade and visit:
 
 **Site administration → Plugins → Local plugins → Automatic browser timezone**
 
@@ -41,17 +43,31 @@ Enable automatic browser timezone updates.
 
 ## Settings
 
-- **Enable automatic browser timezone** — enables detection and profile updates.
-- **Reload after timezone change** — reloads the current page after an update so server-rendered dates immediately reflect the new timezone.
+- **Enable automatic browser timezone** — enables browser timezone detection and profile updates.
+- **Reload after timezone change** — reloads the current page after a successful update so server-rendered dates immediately reflect the new timezone.
+
+## Security
+
+The server does not trust the browser value blindly. The AJAX function requires an authenticated session and the `moodle/user:editownprofile` capability, and the reported timezone is validated against Moodle's supported timezone list before the user's profile is updated.
+
+Please report security issues according to [SECURITY.md](SECURITY.md).
 
 ## Privacy
 
-The plugin does not maintain its own user-data table and does not send location or timezone data to external services. It updates Moodle's existing `user.timezone` profile field for the currently logged-in user.
+The plugin does not create plugin-owned user data tables and does not transmit timezone or location data to an external service. It processes the browser-reported IANA timezone and writes it to Moodle's existing core `user.timezone` profile field. That core profile data is covered by Moodle's `core_user` Privacy API provider.
+
+## Issue tracker and contributions
+
+Public bug reports and feature requests are handled through GitHub Issues:
+
+https://github.com/LightMoonProjects/moodle-local_autobrowsertimezone/issues
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidance.
 
 ## Development status
 
-Initial bootstrap / alpha implementation. Test on a staging Moodle site before production deployment.
+The current repository version is an alpha bootstrap intended for staging validation before the first Moodle Marketplace release. Marketplace-targeted QA items are tracked in [docs/MARKETPLACE_READINESS.md](docs/MARKETPLACE_READINESS.md).
 
 ## License
 
-GPL v3 or later.
+GNU GPL v3 or later. See [LICENSE](LICENSE).

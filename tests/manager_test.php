@@ -14,19 +14,29 @@
 // You should have received a copy of the GNU General Public License
 // along with Moodle. If not, see <https://www.gnu.org/licenses/>.
 
+namespace local_autobrowsertimezone;
+
+use local_autobrowsertimezone\local\manager;
+
 /**
- * Version metadata for the Automatic browser timezone plugin.
+ * Tests for timezone validation logic.
  *
  * @package    local_autobrowsertimezone
  * @copyright  2026 LightMoonProjects
  * @license    https://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @covers     \local_autobrowsertimezone\local\manager
  */
-
-defined('MOODLE_INTERNAL') || die();
-
-$plugin->component = 'local_autobrowsertimezone';
-$plugin->version = 2026082001;
-$plugin->release = '0.1.1';
-$plugin->requires = 2024100700; // Moodle 4.5.
-$plugin->supported = [405, 502];
-$plugin->maturity = MATURITY_ALPHA;
+final class manager_test extends \advanced_testcase {
+    /**
+     * Moodle timezone choices accept normal IANA zones and reject unknown values.
+     *
+     * @return void
+     */
+    public function test_supported_timezone_validation(): void {
+        $this->assertTrue(manager::is_supported_timezone('Australia/Sydney'));
+        $this->assertTrue(manager::is_supported_timezone('Europe/London'));
+        $this->assertFalse(manager::is_supported_timezone(''));
+        $this->assertFalse(manager::is_supported_timezone('99'));
+        $this->assertFalse(manager::is_supported_timezone('Not/A_Timezone'));
+    }
+}

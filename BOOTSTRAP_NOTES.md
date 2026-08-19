@@ -1,21 +1,20 @@
 # Bootstrap notes
 
-Initial design choices:
+The bootstrap is intentionally structured for an eventual Moodle Marketplace submission rather than as a site-specific hack.
+
+Key design choices:
 
 - Browser/device timezone only; no GPS, IP geolocation, or external API.
-- Moodle 4.4+ Hooks API.
-- Moodle `core/ajax` + an AJAX-enabled external function.
+- Supported Moodle baseline is 4.5–5.2 for the initial Marketplace-targeted release.
+- Moodle Hooks API and autoloaded classes; no legacy `lib.php` callback is required.
+- Moodle `core/ajax` and an AJAX-enabled external function.
 - Server validates the reported timezone against `core_date::get_list_of_timezones()`.
 - The current user must have `moodle/user:editownprofile`.
 - Moodle forced timezone (`$CFG->forcetimezone != 99`) disables synchronisation.
-- Default page reload after a successful update makes server-rendered dates (including Secure Video watermark timestamps) correct immediately.
-- No plugin-owned user-data table.
+- "Login as" sessions and MNet remote users are excluded from automatic profile writes.
+- Authentication-plugin ownership and locking of the timezone profile field is respected.
+- Default page reload after a successful update makes server-rendered dates correct immediately.
+- No plugin-owned database tables and no external data transfer.
+- Privacy metadata explicitly declares processing through Moodle's `core_user` subsystem.
 
-Recommended next steps:
-
-1. Install on staging and test a user whose profile is set to Server timezone.
-2. Test Sydney ↔ Perth and Sydney ↔ London device timezone changes.
-3. Test sites using a forced timezone.
-4. Test an account which cannot edit its own profile.
-5. Add PHPUnit coverage for supported-timezone validation and Behat coverage for the user flow.
-6. Decide whether to add an optional prompt/consent mode before production rollout.
+See `docs/MARKETPLACE_READINESS.md` for the pre-release validation checklist.
