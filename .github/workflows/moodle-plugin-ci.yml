@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, X64, dev-ci-runner]
 
     services:
       postgres:
