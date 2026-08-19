@@ -55,7 +55,7 @@ const markAttempt = (key) => {
 
         window.sessionStorage.setItem(key, '1');
     } catch {
-        // sessionStorage may be unavailable; continue without the loop guard.
+        // Session storage may be unavailable; continue without the loop guard.
     }
 
     return true;
