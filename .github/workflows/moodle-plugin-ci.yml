@@ -12,8 +12,21 @@ jobs:
     runs-on: ubuntu-24.04
 
     services:
+      postgres:
+        image: ${{ matrix.database == 'pgsql' && 'postgres:17' || '' }}
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 3
+
       mariadb:
-        image: mariadb:11
+        image: ${{ matrix.database == 'mariadb' && 'mariadb:11' || '' }}
         env:
           MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: '1'
           MYSQL_CHARACTER_SET_SERVER: utf8mb4
@@ -25,6 +38,18 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 3
+
+    strategy:
+      fail-fast: false
+      matrix:
+        moodle-branch:
+          - MOODLE_405_STABLE
+          - MOODLE_500_STABLE
+          - MOODLE_501_STABLE
+          - MOODLE_502_STABLE
+        database:
+          - pgsql
+          - mariadb
 
     steps:
       - name: Check out plugin
@@ -51,38 +76,33 @@ jobs:
       - name: Install test Moodle
         run: moodle-plugin-ci install --plugin ./plugin --db-host=127.0.0.1
         env:
-          DB: mariadb
-          MOODLE_BRANCH: MOODLE_501_STABLE
-
-      - name: Generate canonical AMD artifacts
-        run: |
-          cd moodle
-          npx grunt amd --root=public/local/autobrowsertimezone
-
-      - name: Collect generated AMD artifacts
-        run: |
-          mkdir -p amd-artifacts
-          cp moodle/public/local/autobrowsertimezone/amd/build/timezone.min.js amd-artifacts/
-          cp moodle/public/local/autobrowsertimezone/amd/build/timezone.min.js.map amd-artifacts/
-
-      - name: Upload generated AMD artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: canonical-amd-build
-          path: amd-artifacts/
-          if-no-files-found: error
+          DB: ${{ matrix.database }}
+          MOODLE_BRANCH: ${{ matrix.moodle-branch }}
 
       - name: PHP lint
+        if: ${{ !cancelled() }}
         run: moodle-plugin-ci phplint
 
       - name: Moodle Code Checker
+        if: ${{ !cancelled() }}
         run: moodle-plugin-ci phpcs --max-warnings 0
 
       - name: Moodle PHPDoc Checker
+        if: ${{ !cancelled() }}
         run: moodle-plugin-ci phpdoc --max-warnings 0
 
       - name: Plugin validation
+        if: ${{ !cancelled() }}
         run: moodle-plugin-ci validate
 
+      - name: Upgrade savepoint validation
+        if: ${{ !cancelled() }}
+        run: moodle-plugin-ci savepoints
+
+      - name: JavaScript / Grunt checks
+        if: ${{ !cancelled() }}
+        run: moodle-plugin-ci grunt --max-lint-warnings 0
+
       - name: PHPUnit tests
+        if: ${{ !cancelled() }}
         run: moodle-plugin-ci phpunit --fail-on-warning
