@@ -27,22 +27,22 @@ defined('MOODLE_INTERNAL') || die();
 if ($hassiteconfig) {
     $settings = new admin_settingpage(
         'local_autobrowsertimezone',
-        get_string('pluginname', 'local_autobrowsertimezone')
+        new lang_string('pluginname', 'local_autobrowsertimezone')
     );
     $ADMIN->add('localplugins', $settings);
 
     if ($ADMIN->fulltree) {
         $settings->add(new admin_setting_configcheckbox(
             'local_autobrowsertimezone/enabled',
-            get_string('enabled', 'local_autobrowsertimezone'),
-            get_string('enabled_desc', 'local_autobrowsertimezone'),
+            new lang_string('enabled', 'local_autobrowsertimezone'),
+            new lang_string('enabled_desc', 'local_autobrowsertimezone'),
             0
         ));
 
         $settings->add(new admin_setting_configcheckbox(
             'local_autobrowsertimezone/reload',
-            get_string('reload', 'local_autobrowsertimezone'),
-            get_string('reload_desc', 'local_autobrowsertimezone'),
+            new lang_string('reload', 'local_autobrowsertimezone'),
+            new lang_string('reload_desc', 'local_autobrowsertimezone'),
             1
         ));
     }
