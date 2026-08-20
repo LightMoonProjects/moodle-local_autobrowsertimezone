@@ -17,26 +17,40 @@ All notable changes to this project will be documented in this file.
   the plugin does process/write personal data through `core_user`; directly implementing the
   base marker interfaces `data_provider`/`shared_data_provider` was rejected because Moodle
   core documents them as not intended to be implemented directly.
-- The existing `core_user` subsystem metadata link for `timezone` is unchanged. The new
+- The existing `core_user` subsystem metadata link for `timezone` is unchanged. The
   `get_contexts_for_userid()`, `export_user_data()`, `delete_data_for_all_users_in_context()`
   and `delete_data_for_user()` methods are no-ops: the plugin owns no independently
   retrievable personal-data record of its own (no plugin table, preference, file area, cache
   entry, or external-service record), and the persistent `user.timezone` value is already
-  exported and deleted/anonymised by `core_user`'s own privacy provider. `core_userlist_provider`
-  was deliberately not added, since the plugin has no context-scoped list of affected users of
-  its own to report.
+  exported and deleted/anonymised by `core_user`'s own privacy provider.
+- Fixed (pre-merge staging follow-up): deploying the above fix to a real Moodle 5.2.2
+  development site confirmed `component_is_compliant('local_autobrowsertimezone')` now returns
+  `true`, but Moodle's Plugin privacy registry page additionally displayed **"Userlist provider
+  missing"**. `tool_dataprivacy\metadata_registry::get_registry_metadata()` (verified identical
+  on Moodle 4.5 and 5.2 core source) independently flags `userlistnoncompliance` for any
+  `core_user_data_provider` descendant -- which `plugin\provider` is -- that does not also
+  implement `\core_privacy\local\request\core_userlist_provider`, regardless of
+  `component_is_compliant()`. The earlier claim that "`core_userlist_provider` was deliberately
+  not added" was therefore incorrect and has been corrected: `core_userlist_provider` is now
+  implemented, with `get_users_in_context()` and `delete_data_for_users()` as no-ops for the
+  same reason as the other request-provider methods -- the plugin owns no independently
+  discoverable users or records of its own.
 - Added PHPUnit coverage exercising `core_privacy\manager::component_is_compliant()` directly
-  (the actual registry-compliance regression, not just interface introspection), plus direct
-  coverage of `get_contexts_for_userid()`, `export_user_data()`, `delete_data_for_user()` and
-  `delete_data_for_all_users_in_context()` proving the user's timezone and an unrelated core
-  profile field are never mutated by this plugin's own request-provider methods.
+  (the actual registry-compliance regression, not just interface introspection), direct
+  coverage of `get_contexts_for_userid()`, `export_user_data()`, `delete_data_for_user()`,
+  `delete_data_for_all_users_in_context()`, `get_users_in_context()` and
+  `delete_data_for_users()` proving the user's timezone and an unrelated core profile field are
+  never mutated by this plugin's own request-provider methods, and a regression against
+  `tool_dataprivacy\metadata_registry::get_registry_metadata()` itself proving the component's
+  registry entry no longer carries `userlistnoncompliance`.
 - Raised `$plugin->release` from `0.1.6` to `1.1` and `$plugin->version` from `2026082006` to
   `2026082007`, and changed `$plugin->maturity` from `MATURITY_ALPHA` to `MATURITY_STABLE` for
   this release target. This maturity change reflects this release's own metadata only; it is
   not evidence that the broader Marketplace release gate in #6 (release QA matrix execution,
   install/upgrade QA, staging privacy re-verification, screenshots) has been completed, and
-  #6 remains open. Staging re-verification of the registry-compliance fix itself is pending
-  post-merge redeployment.
+  #6 remains open. Staging re-verification of this updated fix (both the CLI compliance check
+  and the "Userlist provider missing" warning) is pending post-merge redeployment of the exact
+  new commit.
 
 ## 0.1.6 - 2026-08-20
 

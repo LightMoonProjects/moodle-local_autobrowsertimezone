@@ -115,43 +115,67 @@ to run before a release, not a completed step.
 
 ## 3. Privacy QA
 
-`classes/privacy/provider.php` implements both
+`classes/privacy/provider.php` implements
 `\core_privacy\local\metadata\provider` (declaring a single `core_user`
-subsystem link covering the `timezone` field) and
+subsystem link covering the `timezone` field),
 `\core_privacy\local\request\plugin\provider` (the narrowest Moodle-supported
 request-provider contract for a plugin with no independently owned
-personal-data record). `core_userlist_provider` is not implemented, since the
-plugin has no context-scoped list of affected users of its own to report.
+personal-data record), and `\core_privacy\local\request\core_userlist_provider`
+(required alongside `plugin\provider` — see below). All request-provider
+methods, including `get_users_in_context()`/`delete_data_for_users()`, are
+no-ops: the plugin owns no independently discoverable users or records of its
+own in any context.
 
-This dual implementation was added to resolve
-[#14](https://github.com/LightMoonProjects/moodle-local_autobrowsertimezone/issues/14):
-`core_privacy\manager::component_is_compliant()` does not accept a
-metadata-only provider unless it also implements `null_provider` (not
-appropriate here, since the plugin does process/write personal data through
-`core_user`) — real Moodle 5.2.2 staging QA on the prior 0.1.6 build
-confirmed `component_is_compliant('local_autobrowsertimezone')` returned
-`false` and the Plugin privacy registry showed a red non-compliance warning.
+This was added to resolve
+[#14](https://github.com/LightMoonProjects/moodle-local_autobrowsertimezone/issues/14),
+across two real Moodle 5.2.2 staging findings on the same branch:
+
+1. **`component_is_compliant()` false**: the prior 0.1.6 build implemented
+   only `metadata\provider`. `core_privacy\manager::component_is_compliant()`
+   does not accept a metadata-only provider unless it also implements
+   `null_provider` (not appropriate here, since the plugin does process/write
+   personal data through `core_user`). Staging confirmed
+   `component_is_compliant('local_autobrowsertimezone')` returned `false` and
+   the Plugin privacy registry showed a red non-compliance warning. Fixed by
+   adding `plugin\provider`.
+2. **"Userlist provider missing"**: deploying that fix pre-merge to staging
+   confirmed `component_is_compliant()` now returns `true`, but the Plugin
+   privacy registry additionally displayed **"Userlist provider missing"**.
+   `tool_dataprivacy\metadata_registry::get_registry_metadata()` (verified
+   identical on Moodle 4.5 and 5.2 core source) independently flags
+   `userlistnoncompliance` for any `core_user_data_provider` descendant —
+   which `plugin\provider` is — that does not also implement
+   `core_userlist_provider`, regardless of `component_is_compliant()`. An
+   earlier assumption that `core_userlist_provider` was "deliberately not
+   needed" was disproven by this real staging behaviour and has been
+   corrected: `core_userlist_provider` is now implemented.
 
 - **Automated (pre-merge)**: `tests/privacy_provider_test.php` asserts the
   declared metadata collection contains exactly the `core_user` subsystem
   link with the correct field mapping and summary and that the referenced
   lang strings exist; asserts `core_privacy\manager::component_is_compliant('local_autobrowsertimezone')`
-  returns `true` (the exact registry-compliance regression for #14); and
-  exercises `get_contexts_for_userid()`, `export_user_data()`,
-  `delete_data_for_user()` and `delete_data_for_all_users_in_context()`
-  directly to prove they never mutate the user's timezone or an unrelated
-  core profile field, since the plugin owns nothing independently to
-  export/delete. This is a regression check that runs pre-merge; it does not
-  replace the manual step below, which requires the fixed build to actually
-  be deployed.
+  returns `true`; asserts the provider implements `plugin\provider` and
+  `core_userlist_provider` and does not use `null_provider`; exercises
+  `get_contexts_for_userid()`, `export_user_data()`, `delete_data_for_user()`,
+  `delete_data_for_all_users_in_context()`, `get_users_in_context()` and
+  `delete_data_for_users()` directly to prove they never mutate the user's
+  timezone or an unrelated core profile field; and exercises
+  `tool_dataprivacy\metadata_registry::get_registry_metadata()` itself to
+  prove the component's registry entry no longer carries
+  `userlistnoncompliance`. These are regression checks that run pre-merge;
+  they do not replace the manual step below, which requires the fixed build
+  to actually be deployed.
 - **Manual (staging site, post-merge)**: as an admin, with the fixed/merged
   build deployed, visit **Site administration → Users → Privacy and
   policies → Data registry**, locate "Automatic browser timezone", and
   confirm it shows the declared `core_user` subsystem link rather than "Not
   implemented" or an error; also visit **Plugin privacy registry** and
-  confirm the red non-compliance warning is gone. Not yet executed — the
-  staging site still runs the prior 0.1.6 build until this fix is merged and
-  redeployed.
+  confirm both the red non-compliance warning and "Userlist provider missing"
+  are gone. Not yet executed for the current commit — the staging site was
+  previously used to pre-merge-verify an earlier commit on this same branch
+  (`9aad71f3e16ca5378b2656b38b60248404703463`, which is where "Userlist
+  provider missing" was found) and must be redeployed with the exact new
+  commit before this step can be re-run.
 - `moodle-plugin-ci validate` (part of both CI workflows) also validates
   that Privacy API metadata is present when profile data is touched.
 
@@ -239,11 +263,17 @@ As of this document's most recent update (1.1 / #14):
   release QA workflow.
 - Manual upgrade/developer-debugging QA: **not executed** — procedure
   documented above.
-- Privacy registry compliance fix (#14): **automated `component_is_compliant()`
-  regression added and passing pre-merge**; the real staging Data registry /
-  Plugin privacy registry visual check is **not yet executed** — the staging
-  site still runs the prior 0.1.6 build, which is known non-compliant, until
-  this fix is merged and redeployed.
+- Privacy registry compliance fix (#14): **automated regression added and
+  passing pre-merge** for `component_is_compliant()`, the `plugin\provider`/
+  `core_userlist_provider` contract, and the `metadata_registry`
+  `userlistnoncompliance` check. Real pre-merge staging deployment of an
+  earlier commit on this branch (`9aad71f3e16ca5378b2656b38b60248404703463`)
+  confirmed `component_is_compliant()` returns `true`, but surfaced a second
+  finding — the Plugin privacy registry additionally showed **"Userlist
+  provider missing"** — which is fixed by this branch's current commit. The
+  real staging Plugin privacy registry visual re-check for the *current* PR
+  head is **not yet executed** — the staging site must be redeployed with the
+  exact new commit before that can be confirmed.
 - Public Marketplace source/documentation/tracker URLs: **outstanding** — the
   current GitHub repository and issue tracker are private.
 - Screenshots: **not captured**.

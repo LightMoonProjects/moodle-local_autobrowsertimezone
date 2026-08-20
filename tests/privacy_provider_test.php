@@ -18,6 +18,8 @@ namespace local_autobrowsertimezone;
 
 use core_privacy\local\metadata\collection;
 use core_privacy\local\request\approved_contextlist;
+use core_privacy\local\request\approved_userlist;
+use core_privacy\local\request\userlist;
 use local_autobrowsertimezone\privacy\provider;
 
 /**
@@ -88,7 +90,11 @@ final class privacy_provider_test extends \advanced_testcase {
     /**
      * The provider must implement the concrete plugin\provider contract (which satisfies
      * data_provider transitively) and must not use null_provider, which would misrepresent
-     * a plugin that does process/write personal data through core_user.
+     * a plugin that does process/write personal data through core_user. It must also
+     * implement core_userlist_provider: Moodle's Plugin privacy registry
+     * (tool_dataprivacy\metadata_registry) separately flags "Userlist provider missing" for
+     * any core_user_data_provider descendant (which plugin\provider is) that does not also
+     * implement core_userlist_provider, independently of component_is_compliant().
      *
      * @return void
      */
@@ -98,11 +104,8 @@ final class privacy_provider_test extends \advanced_testcase {
 
         $this->assertTrue($rc->implementsInterface(\core_privacy\local\request\plugin\provider::class));
         $this->assertTrue($rc->implementsInterface(\core_privacy\local\request\data_provider::class));
+        $this->assertTrue($rc->implementsInterface(\core_privacy\local\request\core_userlist_provider::class));
         $this->assertFalse($rc->implementsInterface(\core_privacy\local\metadata\null_provider::class));
-
-        // The plugin owns no context-scoped list of affected users of its own (the timezone
-        // field belongs to core_user), so core_userlist_provider is deliberately not used.
-        $this->assertFalse($rc->implementsInterface(\core_privacy\local\request\core_userlist_provider::class));
     }
 
     /**
@@ -204,5 +207,102 @@ final class privacy_provider_test extends \advanced_testcase {
         $after = \core_user::get_user((int) $user->id, '*', MUST_EXIST);
         $this->assertSame('Pacific/Auckland', $after->timezone);
         $this->assertSame('privacy-context-delete-sentinel', $after->city);
+    }
+
+    /**
+     * The plugin owns no independently retrievable users of its own within any context, so it
+     * must not falsely add a user to the userlist merely because core_user has a timezone for
+     * them.
+     *
+     * @return void
+     */
+    // phpcs:ignore moodle.PHPUnit.TestCaseCovers.Missing
+    public function test_get_users_in_context_reports_no_independently_owned_users(): void {
+        $this->resetAfterTest();
+
+        $user = $this->getDataGenerator()->create_user(['timezone' => 'Asia/Tokyo']);
+        $usercontext = \context_user::instance((int) $user->id);
+
+        $userlist = new userlist($usercontext, 'local_autobrowsertimezone');
+        provider::get_users_in_context($userlist);
+
+        $this->assertCount(0, $userlist);
+    }
+
+    /**
+     * delete_data_for_users() has nothing independently owned to delete. Prove it leaves the
+     * users' timezones and an unrelated profile field unchanged.
+     *
+     * @return void
+     */
+    // phpcs:ignore moodle.PHPUnit.TestCaseCovers.Missing
+    public function test_delete_data_for_users_does_not_mutate_user_profile(): void {
+        $this->resetAfterTest();
+
+        $user1 = $this->getDataGenerator()->create_user([
+            'timezone' => 'Europe/Berlin',
+            'city' => 'privacy-userlist-delete-sentinel-1',
+        ]);
+        $user2 = $this->getDataGenerator()->create_user([
+            'timezone' => 'America/Chicago',
+            'city' => 'privacy-userlist-delete-sentinel-2',
+        ]);
+        $usercontext1 = \context_user::instance((int) $user1->id);
+
+        $approveduserlist = new approved_userlist(
+            $usercontext1,
+            'local_autobrowsertimezone',
+            [$user1->id, $user2->id]
+        );
+
+        provider::delete_data_for_users($approveduserlist);
+
+        $after1 = \core_user::get_user((int) $user1->id, '*', MUST_EXIST);
+        $after2 = \core_user::get_user((int) $user2->id, '*', MUST_EXIST);
+        $this->assertSame('Europe/Berlin', $after1->timezone);
+        $this->assertSame('privacy-userlist-delete-sentinel-1', $after1->city);
+        $this->assertSame('America/Chicago', $after2->timezone);
+        $this->assertSame('privacy-userlist-delete-sentinel-2', $after2->city);
+        $this->assertFalse((bool) $after1->deleted);
+        $this->assertFalse((bool) $after2->deleted);
+    }
+
+    /**
+     * This is the exact regression for the "Userlist provider missing" staging finding: Moodle's
+     * own Plugin privacy registry data (tool_dataprivacy\metadata_registry::get_registry_metadata(),
+     * the same source the Plugin privacy registry page renders from) must not flag
+     * 'userlistnoncompliance' for this component now that core_userlist_provider is implemented.
+     * This exercises the real registry logic rather than duplicating it, without depending on
+     * HTML rendering.
+     *
+     * @return void
+     */
+    // phpcs:ignore moodle.PHPUnit.TestCaseCovers.Missing
+    public function test_registry_metadata_does_not_flag_userlist_noncompliance(): void {
+        $this->resetAfterTest();
+
+        $registry = new \tool_dataprivacy\metadata_registry();
+        $data = $registry->get_registry_metadata();
+
+        // get_registry_metadata() returns a numerically-indexed list of plugin-type branches,
+        // each with a 'plugins' list keyed the same way (not by component name) -- mirror the
+        // reduction Moodle's own admin/tool/dataprivacy/tests/metadata_registry_test.php uses
+        // to look up a single component's entry.
+        $entry = null;
+        foreach ($data as $branch) {
+            if ($branch['plugin_type_raw'] !== 'local') {
+                continue;
+            }
+            foreach ($branch['plugins'] as $plugindata) {
+                if ($plugindata['raw_component'] === 'local_autobrowsertimezone') {
+                    $entry = $plugindata;
+                    break 2;
+                }
+            }
+        }
+
+        $this->assertNotNull($entry, 'local_autobrowsertimezone was not found in the Plugin privacy registry data.');
+        $this->assertTrue($entry['compliant']);
+        $this->assertArrayNotHasKey('userlistnoncompliance', $entry);
     }
 }

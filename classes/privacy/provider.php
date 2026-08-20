@@ -18,7 +18,9 @@ namespace local_autobrowsertimezone\privacy;
 
 use core_privacy\local\metadata\collection;
 use core_privacy\local\request\approved_contextlist;
+use core_privacy\local\request\approved_userlist;
 use core_privacy\local\request\contextlist;
+use core_privacy\local\request\userlist;
 
 /**
  * Privacy provider for the Automatic browser timezone plugin.
@@ -37,13 +39,21 @@ use core_privacy\local\request\contextlist;
  * is \core_privacy\local\request\plugin\provider, which extends core_user_data_provider and
  * therefore satisfies data_provider transitively.
  *
+ * Because plugin\provider is a core_user_data_provider descendant, Moodle's Plugin privacy
+ * registry (tool_dataprivacy\metadata_registry::get_registry_metadata()) separately expects
+ * every core_user_data_provider to also implement core_userlist_provider, and flags
+ * "Userlist provider missing" (userlistnoncompliance) otherwise -- this is a registry-display
+ * check independent of core_privacy\manager::component_is_compliant(), which does not require
+ * it. core_userlist_provider is therefore also implemented here, purely to satisfy that
+ * registry expectation.
+ *
  * The persistent timezone value itself belongs to core_user and is already exported and
  * deleted/anonymised by core_user's own privacy provider (see user/classes/privacy/provider.php)
  * as part of its own responsibility for the {user} table. This plugin owns no independently
  * retrievable personal-data record of its own, so its request-provider methods are no-ops:
- * get_contexts_for_userid() reports no contexts, and the export/delete methods do nothing,
- * rather than duplicating or interfering with core_user's export/deletion of the timezone
- * field or any other core profile data.
+ * get_contexts_for_userid() reports no contexts, get_users_in_context() adds no users, and the
+ * export/delete methods do nothing, rather than duplicating or interfering with core_user's
+ * export/deletion of the timezone field or any other core profile data.
  *
  * @package    local_autobrowsertimezone
  * @copyright  2026 LightMoonProjects
@@ -51,7 +61,8 @@ use core_privacy\local\request\contextlist;
  */
 final class provider implements
     \core_privacy\local\metadata\provider,
-    \core_privacy\local\request\plugin\provider {
+    \core_privacy\local\request\plugin\provider,
+    \core_privacy\local\request\core_userlist_provider {
     /**
      * Describe personal data processed by this plugin.
      *
@@ -109,5 +120,26 @@ final class provider implements
      * @param approved_contextlist $contextlist The approved contexts and user information to delete information for.
      */
     public static function delete_data_for_user(approved_contextlist $contextlist) {
+    }
+
+    /**
+     * Get the list of users who have data within a context.
+     *
+     * Nothing is independently owned by this plugin, so no users are added -- the user's
+     * timezone belongs to core_user and is reported through core_user's own provider.
+     *
+     * @param userlist $userlist The userlist containing the list of users who have data in this context/plugin combination.
+     */
+    public static function get_users_in_context(userlist $userlist) {
+    }
+
+    /**
+     * Delete multiple users within a single context.
+     *
+     * Nothing is independently owned by this plugin to delete.
+     *
+     * @param approved_userlist $userlist The approved context and user information to delete information for.
+     */
+    public static function delete_data_for_users(approved_userlist $userlist) {
     }
 }

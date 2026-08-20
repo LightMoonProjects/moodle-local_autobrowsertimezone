@@ -61,9 +61,12 @@ workflow exists" as equivalent to "the matrix has passed".
 - [ ] Verify privacy metadata and Plugin privacy registry compliance with Moodle's Data
       registry / Plugin privacy registry pages (RELEASE_QA.md section 3). Automated
       regression coverage exists (`tests/privacy_provider_test.php`), including a direct
-      `core_privacy\manager::component_is_compliant()` check added while fixing #14; the
-      real staging visual check (red non-compliance warning gone) is still pending
-      post-merge redeployment, not yet executed.
+      `core_privacy\manager::component_is_compliant()` check and a
+      `tool_dataprivacy\metadata_registry` `userlistnoncompliance` check added while fixing
+      #14. Pre-merge staging deployment of an earlier commit on the fix branch confirmed the
+      red non-compliance warning was gone but surfaced a second finding, "Userlist provider
+      missing", which required implementing `core_userlist_provider`; the real staging visual
+      re-check for the current commit is still pending redeployment, not yet executed.
 - [ ] Confirm publicly accessible Marketplace source, documentation, and issue-tracker URLs. The current GitHub repository and issue tracker are private and must not be described as public (RELEASE_QA.md section 4).
 - [ ] Prepare Marketplace short description, full description, and real screenshots (metadata is partially drafted in RELEASE_QA.md section 4; screenshots and public URLs remain outstanding).
 - [ ] `$plugin->maturity` was raised to `MATURITY_STABLE` as part of the 1.1 release metadata
