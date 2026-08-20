@@ -284,10 +284,9 @@ final class privacy_provider_test extends \advanced_testcase {
         $registry = new \tool_dataprivacy\metadata_registry();
         $data = $registry->get_registry_metadata();
 
-        // Moodle's get_registry_metadata() returns a numerically-indexed list of plugin-type
-        // branches, each with a 'plugins' list keyed the same way (not by component name) --
-        // mirror the reduction admin/tool/dataprivacy/tests/metadata_registry_test.php uses to
-        // look up a single component's entry.
+        // The registry metadata is a numerically indexed list of plugin type branches, and
+        // each branch holds a plugin list that is likewise not indexed by component name.
+        // Locate this component the same way the core metadata registry tests do.
         $entry = null;
         foreach ($data as $branch) {
             if ($branch['plugin_type_raw'] !== 'local') {
