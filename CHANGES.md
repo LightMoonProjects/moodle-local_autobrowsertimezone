@@ -4,12 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## 0.1.5 - 2026-08-20
 
-- The browser timezone sync retry guard now distinguishes a transient AJAX
-  failure (network drop, timeout, temporary server error) from a
-  deterministic server outcome (for example an unsupported timezone). A
-  transient failure releases the per-mismatch session marker so a later page
-  load may retry; a deterministic outcome keeps it set for the rest of the
-  browser session, exactly as before.
+- The browser timezone sync retry guard now distinguishes a generic AJAX
+  transport failure (network drop, timeout, temporary server error) from a
+  deterministic Moodle server outcome (for example an unsupported timezone).
+  A deterministic outcome keeps the per-mismatch session marker set for the
+  rest of the browser session, exactly as before. A generic transport
+  failure gets exactly one bounded retry on a later page load; if that retry
+  also fails generically, the mismatch is likewise guarded for the rest of
+  the session, so a persistently failing request cannot repeat on every page
+  load indefinitely.
 - No change to server-side authorization, eligibility, or persistence logic.
 - `amd/build/timezone.min.js` regenerated from `amd/src/timezone.js` via
   Moodle's Grunt build.

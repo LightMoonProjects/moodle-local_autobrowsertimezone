@@ -42,43 +42,115 @@ const getBrowserTimezone = () => {
 };
 
 /**
- * Prevent repeated failing calls for the same mismatch during a browser session.
+ * Per-mismatch sessionStorage attempt states.
+ *
+ * State machine (see docs/RETRY_GUARD_QA.md for the full manual QA mapping):
+ *
+ *   (absent)  -- no attempt yet for this exact mismatch key; a request may be sent.
+ *      |
+ *      | beginAttempt() claims the key as GUARDED before the request is sent,
+ *      | so a concurrent/duplicate init() for the same mismatch is blocked
+ *      | immediately (no immediate retry, no request storm).
+ *      v
+ *   GUARDED ----------------------------------------------------------------+
+ *      |                                                                    |
+ *      | request resolves successfully                                     | request rejects with
+ *      | (mismatch is resolved; the key is never consulted again)          | a Moodle `errorcode`
+ *      |                                                                    | (deterministic outcome)
+ *      v                                                                    v
+ *   (moot)                                                              GUARDED
+ *                                                                       (permanent for the
+ *                                                                        rest of the session)
+ *
+ *   GUARDED -- request rejects with NO `errorcode` (generic/transport failure) --> RETRY
+ *
+ *   RETRY -- a later page load calls init() again for the same mismatch -->
+ *      beginAttempt() claims the key as GUARDED again (one retry spent) and sends
+ *      exactly one more request:
+ *        - resolves successfully -> (moot), as above;
+ *        - rejects with an `errorcode` -> stays GUARDED (permanent);
+ *        - rejects again with no `errorcode` -> stays GUARDED (permanent) --
+ *          the one-retry budget for this mismatch is now spent, so it will
+ *          NOT be downgraded back to RETRY a second time.
+ *
+ * This bounds a persistent generic/transport failure (repeated proxy denial,
+ * repeated HTTP 500, malformed response, etc.) to at most one retryable
+ * attempt per mismatch per browser session, while a genuine one-off transient
+ * failure still gets exactly one later chance to succeed.
+ */
+const ATTEMPT_STATE_GUARDED = 'guarded';
+const ATTEMPT_STATE_RETRY = 'retry';
+
+/**
+ * Read the current attempt state for a mismatch key.
  *
  * @param {string} key Storage key.
- * @returns {boolean}
+ * @returns {string|null}
  */
-const markAttempt = (key) => {
+const readAttemptState = (key) => {
     try {
-        if (window.sessionStorage.getItem(key) === '1') {
-            return false;
-        }
-
-        window.sessionStorage.setItem(key, '1');
+        return window.sessionStorage.getItem(key);
     } catch {
-        // Session storage may be unavailable; continue without the loop guard.
+        return null;
     }
-
-    return true;
 };
 
 /**
- * Release a previously-set attempt marker so a later page load may retry the
- * same mismatch.
+ * Write the attempt state for a mismatch key.
+ *
+ * @param {string} key Storage key.
+ * @param {string} state One of the ATTEMPT_STATE_* constants.
+ * @returns {void}
+ */
+const writeAttemptState = (key, state) => {
+    try {
+        window.sessionStorage.setItem(key, state);
+    } catch {
+        // Session storage may be unavailable; continue without the loop guard.
+    }
+};
+
+/**
+ * Claim this exact mismatch for an attempt, if one is currently permitted.
+ *
+ * Legacy sessionStorage values ('1') from a previous plugin version are
+ * treated the same as ATTEMPT_STATE_GUARDED: already permanently guarded.
+ *
+ * @param {string} key Storage key.
+ * @returns {{isRetry: boolean}|null} Null when no attempt is currently permitted.
+ */
+const beginAttempt = (key) => {
+    const state = readAttemptState(key);
+
+    if (state !== null && state !== ATTEMPT_STATE_RETRY) {
+        // Either explicitly guarded, or an unrecognised/legacy value: treat
+        // conservatively as already guarded rather than retrying forever.
+        return null;
+    }
+
+    const isRetry = state === ATTEMPT_STATE_RETRY;
+
+    // Claim the key up-front, before the request is sent, so a concurrent or
+    // duplicate call for the same mismatch cannot start a second request.
+    writeAttemptState(key, ATTEMPT_STATE_GUARDED);
+
+    return {isRetry};
+};
+
+/**
+ * Allow exactly one later retry for a mismatch that has not already spent
+ * its one-time retry budget.
  *
  * @param {string} key Storage key.
  * @returns {void}
  */
-const clearAttempt = (key) => {
-    try {
-        window.sessionStorage.removeItem(key);
-    } catch {
-        // Session storage may be unavailable; nothing to release.
-    }
+const allowOneRetry = (key) => {
+    writeAttemptState(key, ATTEMPT_STATE_RETRY);
 };
 
 /**
  * Whether an Ajax.call() rejection represents a deterministic server-side
- * outcome (Moodle exception) rather than a transient transport failure.
+ * outcome (Moodle exception) rather than a generic transport/request failure.
  *
  * core/ajax rejects in two distinct ways: a failed HTTP/transport request
  * (network drop, timeout, non-Moodle error) rejects with a plain string or
@@ -86,8 +158,12 @@ const clearAttempt = (key) => {
  * and was refused there (for example this plugin's own invalid_parameter_exception
  * for an unsupported browser timezone) rejects with the server's exception
  * object, which always has an `errorcode` string. Retrying the latter with
- * the same browser/profile timezone pair would fail identically, so the
- * attempt marker must stay set; only the former is safe to retry later.
+ * the same browser/profile timezone pair would fail identically, so it is
+ * always treated as permanent; a rejection with no `errorcode` may be a
+ * genuinely transient failure, but is only ever given one bounded retry (see
+ * the state machine above) since it could equally be a persistent
+ * transport-level problem that would otherwise generate a request on every
+ * page load forever.
  *
  * @param {*} error The rejection reason from Ajax.call().
  * @returns {boolean}
@@ -117,7 +193,8 @@ export const init = (config) => {
         browserTimezone,
     ].join(':');
 
-    if (!markAttempt(attemptKey)) {
+    const attempt = beginAttempt(attemptKey);
+    if (!attempt) {
         return;
     }
 
@@ -136,10 +213,13 @@ export const init = (config) => {
             return result;
         })
         .catch((error) => {
-            if (!isPermanentServerOutcome(error)) {
-                // A transient transport failure, not a deterministic server
-                // outcome: allow a later page load to retry this mismatch.
-                clearAttempt(attemptKey);
+            if (!isPermanentServerOutcome(error) && !attempt.isRetry) {
+                // First generic/transport failure (not a Moodle exception,
+                // and this was not already a retry): allow exactly one later
+                // page load to retry this mismatch. A second generic failure,
+                // or any failure carrying a Moodle errorcode, leaves the
+                // mismatch guarded for the rest of the session.
+                allowOneRetry(attemptKey);
             }
             Notification.exception(error);
         });

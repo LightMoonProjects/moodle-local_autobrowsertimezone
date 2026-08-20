@@ -21,7 +21,7 @@ When the plugin is enabled:
 
 The plugin does not change a timezone when Moodle has a forced timezone configured. It also respects authentication-plugin profile ownership/locking for the timezone field, and skips guests, suspended/deleted users, MNet remote users, CLI requests, users who lack the `moodle/user:editownprofile` capability, and sessions where an administrator is logged in as another user. If the active authentication plugin rejects or fails to propagate the change (for example, an externally managed account configured to update timezone upstream), Moodle's profile timezone is left exactly as it was; no local-only value is committed.
 
-The browser only attempts a given browser/profile timezone mismatch once per browser session. If that attempt fails for a transient reason (a network interruption or a temporary server error), a later page load in the same session may retry it; a deterministic outcome such as an unsupported browser timezone is not retried again until the browser session ends. See [docs/RETRY_GUARD_QA.md](docs/RETRY_GUARD_QA.md) for the manual QA procedure covering this behaviour.
+The browser only attempts a given browser/profile timezone mismatch once per browser session. A deterministic outcome (for example an unsupported browser timezone) is not retried again until the browser session ends. A generic network/transport failure gets exactly one later retry on a subsequent page load; if that retry also fails generically, the mismatch is likewise not retried again for the rest of the session — a persistently failing request never repeats on every page load indefinitely. See [docs/RETRY_GUARD_QA.md](docs/RETRY_GUARD_QA.md) for the manual QA procedure covering this behaviour.
 
 ## Requirements and supported Moodle versions
 
