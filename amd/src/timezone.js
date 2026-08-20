@@ -62,6 +62,41 @@ const markAttempt = (key) => {
 };
 
 /**
+ * Release a previously-set attempt marker so a later page load may retry the
+ * same mismatch.
+ *
+ * @param {string} key Storage key.
+ * @returns {void}
+ */
+const clearAttempt = (key) => {
+    try {
+        window.sessionStorage.removeItem(key);
+    } catch {
+        // Session storage may be unavailable; nothing to release.
+    }
+};
+
+/**
+ * Whether an Ajax.call() rejection represents a deterministic server-side
+ * outcome (Moodle exception) rather than a transient transport failure.
+ *
+ * core/ajax rejects in two distinct ways: a failed HTTP/transport request
+ * (network drop, timeout, non-Moodle error) rejects with a plain string or
+ * generic error that carries no `errorcode`; a request that reached Moodle
+ * and was refused there (for example this plugin's own invalid_parameter_exception
+ * for an unsupported browser timezone) rejects with the server's exception
+ * object, which always has an `errorcode` string. Retrying the latter with
+ * the same browser/profile timezone pair would fail identically, so the
+ * attempt marker must stay set; only the former is safe to retry later.
+ *
+ * @param {*} error The rejection reason from Ajax.call().
+ * @returns {boolean}
+ */
+const isPermanentServerOutcome = (error) => {
+    return Boolean(error) && typeof error.errorcode === 'string' && error.errorcode !== '';
+};
+
+/**
  * Initialise automatic browser timezone synchronisation.
  *
  * @param {Object} config Runtime config.
@@ -100,5 +135,12 @@ export const init = (config) => {
             }
             return result;
         })
-        .catch(Notification.exception);
+        .catch((error) => {
+            if (!isPermanentServerOutcome(error)) {
+                // A transient transport failure, not a deterministic server
+                // outcome: allow a later page load to retry this mismatch.
+                clearAttempt(attemptKey);
+            }
+            Notification.exception(error);
+        });
 };
