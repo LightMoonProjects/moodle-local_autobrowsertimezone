@@ -434,7 +434,7 @@ final class manager_test extends \advanced_testcase {
         $user = $this->getDataGenerator()->create_user();
         $this->setUser($user);
 
-        // $CFG->mnet_localhost_id is populated by every Moodle install; set a
+        // Config mnet_localhost_id is populated by every Moodle install; set a
         // host id guaranteed to differ from it, exactly what
         // is_mnet_remote_user() treats as a remote profile.
         $USER->mnethostid = (int)$CFG->mnet_localhost_id + 1;
