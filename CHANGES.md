@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.1.4 - 2026-08-20
+
+- `manager::should_run()` now checks `moodle/user:editownprofile` at system
+  context, so browser timezone synchronisation is never queued for a user who
+  is known in advance to lack permission to edit their own profile.
+- The `update_timezone` external function's independent `require_capability()`
+  check (Issue #3) is unchanged and remains the authoritative security
+  boundary; this only avoids emitting a known-forbidden request.
+
 ## 0.1.3 - 2026-08-20
 
 - Remove the `require_login()` call from the `update_timezone` AJAX external

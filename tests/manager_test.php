@@ -47,6 +47,19 @@ final class manager_test extends \advanced_testcase {
     }
 
     /**
+     * Invoke the moodle/user:editownprofile eligibility check without the
+     * request-level CLI guard, for the same reason as
+     * auth_plugin_allows_timezone_update() above.
+     *
+     * @return bool
+     */
+    private function can_edit_own_profile(): bool {
+        $method = new \ReflectionMethod(manager::class, 'can_edit_own_profile');
+
+        return (bool)$method->invoke(null);
+    }
+
+    /**
      * Moodle timezone choices accept normal IANA zones and reject unknown values.
      *
      * @return void
@@ -183,5 +196,70 @@ final class manager_test extends \advanced_testcase {
         set_config('field_lock_timezone', 'unlockedifempty', 'auth_manual');
 
         $this->assertTrue($this->auth_plugin_allows_timezone_update());
+    }
+
+    /**
+     * A default authenticated user has moodle/user:editownprofile by role
+     * archetype and remains eligible on this check.
+     *
+     * @return void
+     */
+    // phpcs:ignore moodle.PHPUnit.TestCaseCovers.Missing
+    public function test_can_edit_own_profile_true_for_default_user(): void {
+        $this->resetAfterTest();
+
+        $user = $this->getDataGenerator()->create_user();
+        $this->setUser($user);
+
+        $this->assertTrue($this->can_edit_own_profile());
+    }
+
+    /**
+     * A user whose role has moodle/user:editownprofile explicitly prohibited
+     * at system context must not be eligible for synchronisation, mirroring
+     * the capability update_timezone::execute() enforces independently.
+     *
+     * @return void
+     */
+    // phpcs:ignore moodle.PHPUnit.TestCaseCovers.Missing
+    public function test_can_edit_own_profile_false_when_capability_prohibited(): void {
+        global $DB;
+
+        $this->resetAfterTest();
+
+        $user = $this->getDataGenerator()->create_user();
+        $this->setUser($user);
+
+        $roleid = $DB->get_field('role', 'id', ['shortname' => 'user'], MUST_EXIST);
+        assign_capability(
+            'moodle/user:editownprofile',
+            CAP_PROHIBIT,
+            $roleid,
+            \context_system::instance()->id,
+            true
+        );
+        accesslib_clear_all_caches_for_unit_testing();
+
+        $this->assertFalse($this->can_edit_own_profile());
+    }
+
+    /**
+     * should_run() must still be false under PHPUnit's CLI_SCRIPT even for an
+     * otherwise fully-eligible, fully-capable user: adding the
+     * moodle/user:editownprofile check must not weaken the existing CLI
+     * safeguard, and no other guard should have been loosened to compensate.
+     *
+     * @return void
+     */
+    // phpcs:ignore moodle.PHPUnit.TestCaseCovers.Missing
+    public function test_should_run_remains_false_under_cli_for_capable_user(): void {
+        $this->resetAfterTest();
+
+        set_config('enabled', 1, 'local_autobrowsertimezone');
+        $user = $this->getDataGenerator()->create_user(['timezone' => '99']);
+        $this->setUser($user);
+
+        $this->assertTrue($this->can_edit_own_profile());
+        $this->assertFalse(manager::should_run());
     }
 }

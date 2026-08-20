@@ -19,7 +19,7 @@ When the plugin is enabled:
 5. The current user's Moodle profile timezone is updated through Moodle's user API only after that authentication-plugin update succeeds.
 6. By default the page reloads once so server-rendered dates immediately use the new timezone.
 
-The plugin does not change a timezone when Moodle has a forced timezone configured. It also respects authentication-plugin profile ownership/locking for the timezone field, and skips guests, suspended/deleted users, MNet remote users, CLI requests, and sessions where an administrator is logged in as another user. If the active authentication plugin rejects or fails to propagate the change (for example, an externally managed account configured to update timezone upstream), Moodle's profile timezone is left exactly as it was; no local-only value is committed.
+The plugin does not change a timezone when Moodle has a forced timezone configured. It also respects authentication-plugin profile ownership/locking for the timezone field, and skips guests, suspended/deleted users, MNet remote users, CLI requests, users who lack the `moodle/user:editownprofile` capability, and sessions where an administrator is logged in as another user. If the active authentication plugin rejects or fails to propagate the change (for example, an externally managed account configured to update timezone upstream), Moodle's profile timezone is left exactly as it was; no local-only value is committed.
 
 ## Requirements and supported Moodle versions
 
