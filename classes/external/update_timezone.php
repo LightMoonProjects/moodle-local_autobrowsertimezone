@@ -71,7 +71,7 @@ final class update_timezone extends external_api {
         return new external_single_structure([
             'changed' => new external_value(PARAM_BOOL, 'Whether the timezone changed'),
             'timezone' => new external_value(PARAM_RAW_TRIMMED, 'Resulting Moodle profile timezone'),
-            'reason' => new external_value(PARAM_ALPHA, 'updated, unchanged, or disabled'),
+            'reason' => new external_value(PARAM_ALPHA, 'updated, unchanged, disabled, or authrejected'),
         ]);
     }
 }
