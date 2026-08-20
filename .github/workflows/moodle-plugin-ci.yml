@@ -2,6 +2,8 @@ name: Moodle Plugin CI
 
 on:
   push:
+    branches:
+      - main
   pull_request:
 
 permissions:
@@ -76,7 +78,13 @@ jobs:
           echo "NVM_DIR=$HOME/.nvm" >> "$GITHUB_ENV"
 
       - name: Install test Moodle
-        run: moodle-plugin-ci install --plugin ./plugin --db-host=127.0.0.1
+        run: |
+          rm -rf "$RUNNER_TEMP/moodle" "$RUNNER_TEMP/moodledata"
+          moodle-plugin-ci install \
+            --plugin ./plugin \
+            --moodle "$RUNNER_TEMP/moodle" \
+            --data "$RUNNER_TEMP/moodledata" \
+            --db-host=127.0.0.1
         env:
           DB: ${{ matrix.database }}
           MOODLE_BRANCH: ${{ matrix.moodle-branch }}
