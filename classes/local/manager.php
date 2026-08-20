@@ -62,6 +62,12 @@ final class manager {
             return false;
         }
 
+        // Mirror the external function's own authorization boundary so sync is never
+        // queued for a user who is known in advance to be denied the update.
+        if (!self::can_edit_own_profile()) {
+            return false;
+        }
+
         // Respect authentication-plugin ownership and locking of the core timezone profile field.
         if (!self::can_update_timezone_for_auth_plugin()) {
             return false;
@@ -73,6 +79,20 @@ final class manager {
         }
 
         return true;
+    }
+
+    /**
+     * Whether the current user is permitted to edit their own profile.
+     *
+     * Checks the same capability, in the same context, that
+     * update_timezone::execute() enforces independently as its own security
+     * boundary (see Issue #3). This only prevents unnecessary/known-forbidden
+     * synchronisation attempts; it does not replace that server-side check.
+     *
+     * @return bool
+     */
+    private static function can_edit_own_profile(): bool {
+        return has_capability('moodle/user:editownprofile', \context_system::instance());
     }
 
     /**
