@@ -4,19 +4,21 @@ This document describes the concrete, repeatable release gate for
 `local_autobrowsertimezone`, separate from routine per-PR CI. It exists so a
 Marketplace release decision does not depend on ad hoc manual steps.
 
-Nothing in this document has been executed as part of preparing it (see
-"Current status" at the end). It is the procedure to follow, and the record
-of what has/has not actually been run, not a claim that the plugin is
-release-ready.
+The routine PR CI and automated PHPUnit/privacy regression coverage described
+below have run on the development branch where noted. The release-specific
+compatibility matrix and staging/manual steps have **not** yet been executed;
+see "Current status" at the end. This document is the procedure to follow and
+the record of what has/has not actually been run, not a claim that the plugin
+is release-ready.
 
 ## Automated vs manual vs outstanding
 
 | Area | Mechanism | Trigger |
 |---|---|---|
 | PHP lint, PHPCS, PHPDoc, plugin validation, savepoints, JS lint/Grunt, PHPUnit on Moodle 5.2 x MariaDB | `.github/workflows/moodle-plugin-ci.yml` | Automatic, every push/PR |
-| Same formal checks plus PHPUnit on the full declared Moodle 4.5-5.2 x PostgreSQL/MariaDB matrix | `.github/workflows/moodle-plugin-release-qa.yml` | Manual (`workflow_dispatch`), before a release |
-| Install/upgrade QA, developer-debugging QA, Privacy API Data registry check | This document | Manual, staging site |
-| Marketplace metadata, screenshots, tagging, packaging, publishing | This document / repository release process | Manual, explicitly authorised only |
+| Same formal checks plus clean plugin install and PHPUnit on the full declared Moodle 4.5-5.2 x PostgreSQL/MariaDB matrix | `.github/workflows/moodle-plugin-release-qa.yml` | Manual (`workflow_dispatch`), before a release |
+| Upgrade QA, developer-debugging QA, Privacy API Data registry check | This document | Manual, staging site |
+| Public Marketplace source/documentation/tracker URLs, screenshots, tagging, packaging, publishing | This document / repository release process | Manual, explicitly authorised only |
 
 ## 1. Release QA workflow
 
@@ -32,9 +34,9 @@ Two jobs:
    lint, Moodle Code Checker, PHPDoc, plugin validation, savepoints, JS
    lint/Grunt. These checks are not database/Moodle-version-specific, so
    running them on every compatibility leg would be redundant expense.
-2. **`compatibility`** (depends on `formal-checks` passing) — installs the
-   plugin and runs the PHPUnit suite on all 8 legs of the declared support
-   range:
+2. **`compatibility`** (depends on `formal-checks` passing) — performs a
+   clean plugin install and runs the PHPUnit suite on all 8 legs of the
+   declared support range:
    - Moodle 4.5 x MariaDB
    - Moodle 4.5 x PostgreSQL
    - Moodle 5.0 x MariaDB
@@ -54,50 +56,61 @@ treat that as equivalent to a passing run.
 
 The plugin has no custom database schema (no `db/install.xml`, no
 `db/upgrade.php` steps), so install/upgrade QA is about confirming Moodle's
-own plugin install/upgrade process completes cleanly and the plugin behaves
+plugin install/upgrade process completes cleanly and the plugin behaves
 correctly afterwards, not about a schema migration.
 
-**Clean install**: install the plugin fresh into a supported Moodle site,
-visit **Site administration → Notifications** to complete the install,
+**Clean install across the declared support range** is part of the release QA
+workflow. Each of the 8 Moodle/database compatibility legs starts from a
+clean Moodle test installation and installs the plugin with
+`moodle-plugin-ci install` before running PHPUnit. Do not mark clean-install
+coverage complete until all 8 release-QA legs have actually completed
+successfully.
+
+**Manual staging smoke after install**: on the staging environments used for
+release QA, visit **Site administration → Notifications** as required,
 confirm no errors, then confirm the settings page (**Site administration →
 Plugins → Local plugins → Automatic browser timezone**) loads and the
 `enabled`/`reload` settings are present with their documented defaults
-(`enabled` off, `reload` on).
+(`enabled` off, `reload` on). At minimum exercise this browser/UI smoke on
+the minimum supported Moodle release and one current supported release so
+the non-CLI web path is covered.
 
-**Upgrade**: install the previous releasable version first, then upgrade to
-the current version in place, and confirm the upgrade completes with no
+**Upgrade**: install the immediate previous release first, then upgrade to
+the current version in place and confirm the upgrade completes with no
 errors, the plugin remains functional, and its version number updates as
-expected. The previous version is available as a real commit rather than a
-constructed fixture:
+expected. For the current 0.1.6 candidate, the immediate predecessor is the
+real 0.1.5 commit:
 
 ```
-git show 43850ca86c8c9f6608c45b71a2fa64551b5904b3:. # 0.1.4, the last release before this PR
+git show 78e9d35426318ee22641b8062eb4b0bdadb3777b:. # 0.1.5 / 2026082005
 ```
 
-(`43850ca86c8c9f6608c45b71a2fa64551b5904b3` is the commit where
-`version.php` last declared `2026082004` / `0.1.4`, immediately before the
-work in this pull request. Check out that commit's plugin tree as the
-"previous version" and the tip of this branch as the "current version".)
+`78e9d35426318ee22641b8062eb4b0bdadb3777b` is the current `main` commit on
+which this QA pull request is based and where `version.php` declares
+`2026082005` / `0.1.5`. Use that plugin tree as the previous version and the
+tip of the release candidate branch (currently 0.1.6) as the upgrade target.
+Testing an older hop such as 0.1.4 → 0.1.6 may be useful as additional
+confidence, but it must not replace the immediate-predecessor upgrade test.
 
-**Scope**: exercising this on every one of the 8 supported branch/database
-combinations is disproportionate for a plugin with zero schema — Moodle's
-own upgrade/install code path is what would differ between those, not
-anything this plugin controls. A single MariaDB leg and a single PostgreSQL
-leg (both on the minimum supported branch, `MOODLE_405_STABLE`, since that
-is where the widest API gap to current code exists) is proportionate
-coverage; the release-QA compatibility matrix already separately proves
-plugin installation succeeds on every branch/database combination as a
-side effect of `moodle-plugin-ci install`.
+**Manual upgrade scope**: because the plugin has no plugin-owned schema or
+upgrade steps, manually repeating the same 0.1.5 → 0.1.6 upgrade on all eight
+Moodle/database combinations is disproportionate. Execute the manual upgrade
+on `MOODLE_405_STABLE` with both MariaDB and PostgreSQL, recording the exact
+result. The release-QA matrix separately proves clean installation and
+runtime PHPUnit compatibility on all 8 supported branch/database legs. If
+that matrix, developer debugging, or the minimum-version upgrade exposes a
+version-specific concern, expand upgrade testing to the affected branch(es)
+before release.
 
 **Developer debugging**: with `$CFG->debug = DEBUG_DEVELOPER` and
 `$CFG->debugdisplay = 1`, exercise: a page load with a browser/profile
 timezone mismatch and the plugin enabled; a successful update; the settings
-page; and a page load with the plugin disabled. Confirm no PHP
-notices/warnings and no debugging() output.
+page; a page load with the plugin disabled; and a login-as session. Confirm
+no PHP notices/warnings, no fatal errors, and no unexpected `debugging()`
+output.
 
-This has not been executed (no staging Moodle site is available in the
-environment that prepared this document); it is the procedure to run
-before a release, not a completed step.
+These release/staging steps have not yet been executed; this is the procedure
+to run before a release, not a completed step.
 
 ## 3. Privacy QA
 
@@ -117,8 +130,9 @@ the `timezone` field.
   timezone", and confirm it shows the declared `core_user` subsystem link
   rather than "Not implemented" or an error. Not yet executed (requires a
   staging site).
-- `moodle-plugin-ci validate` (part of both CI workflows) also validates
-  that Privacy API metadata is present when profile data is touched.
+- `moodle-plugin-ci validate` remains part of the formal CI gate, but a
+  successful generic plugin-validation step is not a substitute for the
+  automated metadata regression test or the manual Data registry check.
 
 ## 4. Marketplace metadata draft
 
@@ -138,10 +152,24 @@ publication time:
   active authentication plugin's own update policy (capability, field lock,
   `can_edit_profile()`, `user_update()`) permits it. No GPS, IP geolocation,
   MaxMind, or third-party timezone service is used.
-- **Source repository**: `https://github.com/LightMoonProjects/moodle-local_autobrowsertimezone`
-- **Documentation URL**: the repository `README.md` (no separate hosted
-  documentation site exists; do not fabricate one).
-- **Public issue tracker**: `https://github.com/LightMoonProjects/moodle-local_autobrowsertimezone/issues`
+- **Current source repository (private)**:
+  `https://github.com/LightMoonProjects/moodle-local_autobrowsertimezone`.
+  This is the authoritative development repository, but it is currently
+  private and therefore is **not yet a public Marketplace source URL**.
+- **Public source URL**: **outstanding** — before publication, provide a
+  publicly accessible source location (for example by explicitly making the
+  intended repository public, or by providing another approved public source
+  repository). Repository visibility must not be changed implicitly as part
+  of QA work.
+- **Documentation URL**: **outstanding as a public URL** while the current
+  repository is private. The repository `README.md` is the documentation
+  source and can be used once it is publicly accessible, or an approved
+  separate public documentation URL can be supplied.
+- **Current issue tracker (private)**:
+  `https://github.com/LightMoonProjects/moodle-local_autobrowsertimezone/issues`.
+- **Public issue tracker URL**: **outstanding** — the current private tracker
+  must not be described as public. Provide an accessible public tracker
+  before Marketplace publication.
 - **Supported Moodle versions**: 4.5 through 5.2 (`version.php`
   `$plugin->supported`).
 - **Privacy statement**: see section 3 above and `README.md`'s "Privacy"
@@ -164,22 +192,32 @@ publish a Marketplace package until:
 
 - the release QA workflow has actually run (not merely exists) and every
   leg is confirmed green individually;
-- install/upgrade QA (section 2) has actually been executed with a result
-  recorded;
+- install/upgrade and developer-debugging QA (section 2) have actually been
+  executed with results recorded;
 - the Data registry manual privacy check (section 3) has actually been
   executed;
+- publicly accessible source, documentation, and issue-tracker URLs have
+  been confirmed;
 - real screenshots have been captured;
 - CHANGES.md and README.md accurately describe the release.
 
 ## Current status
 
-As of this document's introduction:
+As of this document's current revision:
 
+- Routine PR CI for PR #13: **passed** on Moodle 5.2 x MariaDB, including
+  formal checks and PHPUnit (30 tests, 70 assertions).
 - Release QA workflow: **exists on this branch, not yet runnable**
   (`workflow_dispatch` workflows only become runnable once merged to the
   default branch) — pending post-merge execution.
-- Install/upgrade QA: **not executed** — procedure documented above.
+- Clean-install release matrix: **not executed** — covered by the pending
+  release QA workflow.
+- Manual upgrade/developer-debugging QA: **not executed** — procedure
+  documented above.
 - Privacy Data registry check: **not executed** — procedure documented
-  above; automated metadata regression test added.
+  above; automated metadata regression test exists and passes in routine CI.
+- Public Marketplace source/documentation/tracker URLs: **outstanding** — the
+  current GitHub repository and issue tracker are private.
 - Screenshots: **not captured**.
-- Marketplace metadata: **drafted** (section 4), not finalised/published.
+- Marketplace metadata: **partially drafted** (section 4), not
+  finalised/published.
