@@ -52,8 +52,9 @@ final class update_timezone extends external_api {
             'timezone' => $timezone,
         ]);
 
-        require_login();
-
+        // External functions must not call require_login(): validate_context()
+        // already performs the equivalent login check (with the AJAX-safe
+        // preventredirect signature) as part of Moodle's External API contract.
         $context = \context_system::instance();
         self::validate_context($context);
         require_capability('moodle/user:editownprofile', $context);

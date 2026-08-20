@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.1.2 - 2026-08-20
+
+- Remove the `require_login()` call from the `update_timezone` AJAX external
+  function. Moodle's External API contract already enforces login through
+  `validate_context()`; `require_login()` is reserved for page scripts and is
+  redundant/inappropriate inside external functions.
+- No behavioural change to authorisation: parameter validation, system-context
+  validation and `moodle/user:editownprofile` capability enforcement are
+  unchanged.
+
 ## 0.1.1 - 2026-08-20
 
 - Align bootstrap metadata with Moodle 4.5–5.2 support.
