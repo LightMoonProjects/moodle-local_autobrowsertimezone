@@ -78,22 +78,23 @@ the non-CLI web path is covered.
 **Upgrade**: install the immediate previous release first, then upgrade to
 the current version in place and confirm the upgrade completes with no
 errors, the plugin remains functional, and its version number updates as
-expected. For the current 0.1.6 candidate, the immediate predecessor is the
-real 0.1.5 commit:
+expected. For the current 1.1 candidate, the immediate predecessor is the
+real 0.1.6 commit:
 
 ```
-git show 78e9d35426318ee22641b8062eb4b0bdadb3777b:. # 0.1.5 / 2026082005
+git show 3cf499f860001c19a8452e1cedfcfb3ac5c29fdd:. # 0.1.6 / 2026082006
 ```
 
-`78e9d35426318ee22641b8062eb4b0bdadb3777b` is the current `main` commit on
-which this QA pull request is based and where `version.php` declares
-`2026082005` / `0.1.5`. Use that plugin tree as the previous version and the
-tip of the release candidate branch (currently 0.1.6) as the upgrade target.
-Testing an older hop such as 0.1.4 → 0.1.6 may be useful as additional
-confidence, but it must not replace the immediate-predecessor upgrade test.
+`3cf499f860001c19a8452e1cedfcfb3ac5c29fdd` is the current `main` commit on
+which this pull request is based and where `version.php` declares
+`2026082006` / `0.1.6`. Use that plugin tree as the previous version and the
+tip of the release candidate branch (currently 1.1 / 2026082007) as the
+upgrade target. This is an ordinary plugin version-number upgrade -- the
+plugin has no `db/upgrade.php` schema step, so no fake migration step is
+introduced solely for this version bump.
 
 **Manual upgrade scope**: because the plugin has no plugin-owned schema or
-upgrade steps, manually repeating the same 0.1.5 → 0.1.6 upgrade on all eight
+upgrade steps, manually repeating the same 0.1.6 → 1.1 upgrade on all eight
 Moodle/database combinations is disproportionate. Execute the manual upgrade
 on `MOODLE_405_STABLE` with both MariaDB and PostgreSQL, recording the exact
 result. The release-QA matrix separately proves clean installation and
@@ -114,25 +115,45 @@ to run before a release, not a completed step.
 
 ## 3. Privacy QA
 
-`classes/privacy/provider.php` implements
-`\core_privacy\local\metadata\provider` only (no plugin-owned personal data,
-so no `core_userlist_provider`/`plugin\provider` export/delete interfaces
-are applicable) and declares a single `core_user` subsystem link covering
-the `timezone` field.
+`classes/privacy/provider.php` implements both
+`\core_privacy\local\metadata\provider` (declaring a single `core_user`
+subsystem link covering the `timezone` field) and
+`\core_privacy\local\request\plugin\provider` (the narrowest Moodle-supported
+request-provider contract for a plugin with no independently owned
+personal-data record). `core_userlist_provider` is not implemented, since the
+plugin has no context-scoped list of affected users of its own to report.
 
-- **Automated**: `tests/privacy_provider_test.php` asserts the declared
-  metadata collection contains exactly this subsystem link with the correct
-  field mapping and summary, and that the referenced lang strings exist.
-  This is a regression check on the declaration; it does not replace the
-  manual step below.
-- **Manual (staging site)**: as an admin, visit **Site administration →
-  Users → Privacy and policies → Data registry**, locate "Automatic browser
-  timezone", and confirm it shows the declared `core_user` subsystem link
-  rather than "Not implemented" or an error. Not yet executed (requires a
-  staging site).
-- `moodle-plugin-ci validate` remains part of the formal CI gate, but a
-  successful generic plugin-validation step is not a substitute for the
-  automated metadata regression test or the manual Data registry check.
+This dual implementation was added to resolve
+[#14](https://github.com/LightMoonProjects/moodle-local_autobrowsertimezone/issues/14):
+`core_privacy\manager::component_is_compliant()` does not accept a
+metadata-only provider unless it also implements `null_provider` (not
+appropriate here, since the plugin does process/write personal data through
+`core_user`) — real Moodle 5.2.2 staging QA on the prior 0.1.6 build
+confirmed `component_is_compliant('local_autobrowsertimezone')` returned
+`false` and the Plugin privacy registry showed a red non-compliance warning.
+
+- **Automated (pre-merge)**: `tests/privacy_provider_test.php` asserts the
+  declared metadata collection contains exactly the `core_user` subsystem
+  link with the correct field mapping and summary and that the referenced
+  lang strings exist; asserts `core_privacy\manager::component_is_compliant('local_autobrowsertimezone')`
+  returns `true` (the exact registry-compliance regression for #14); and
+  exercises `get_contexts_for_userid()`, `export_user_data()`,
+  `delete_data_for_user()` and `delete_data_for_all_users_in_context()`
+  directly to prove they never mutate the user's timezone or an unrelated
+  core profile field, since the plugin owns nothing independently to
+  export/delete. This is a regression check that runs pre-merge; it does not
+  replace the manual step below, which requires the fixed build to actually
+  be deployed.
+- **Manual (staging site, post-merge)**: as an admin, with the fixed/merged
+  build deployed, visit **Site administration → Users → Privacy and
+  policies → Data registry**, locate "Automatic browser timezone", and
+  confirm it shows the declared `core_user` subsystem link rather than "Not
+  implemented" or an error; also visit **Plugin privacy registry** and
+  confirm the red non-compliance warning is gone. Not yet executed — the
+  staging site still runs the prior 0.1.6 build until this fix is merged and
+  redeployed.
+- `moodle-plugin-ci validate` (part of both CI workflows) also validates
+  that Privacy API metadata is present when profile data is touched.
 
 ## 4. Marketplace metadata draft
 
@@ -187,15 +208,17 @@ publication time:
 
 ## 5. Release decision gate
 
-Do not change `$plugin->maturity` from `MATURITY_ALPHA`, tag a release, or
-publish a Marketplace package until:
+`$plugin->maturity` was raised to `MATURITY_STABLE` as part of the 1.1
+release metadata target requested in #14. That change reflects this
+release's own metadata only. Do not tag a release or publish a Marketplace
+package until:
 
 - the release QA workflow has actually run (not merely exists) and every
   leg is confirmed green individually;
 - install/upgrade and developer-debugging QA (section 2) have actually been
   executed with results recorded;
-- the Data registry manual privacy check (section 3) has actually been
-  executed;
+- the Data registry / Plugin privacy registry manual check (section 3) has
+  actually been executed against the merged/deployed build;
 - publicly accessible source, documentation, and issue-tracker URLs have
   been confirmed;
 - real screenshots have been captured;
@@ -203,10 +226,12 @@ publish a Marketplace package until:
 
 ## Current status
 
-As of this document's current revision:
+As of this document's most recent update (1.1 / #14):
 
-- Routine PR CI for PR #13: **passed** on Moodle 5.2 x MariaDB, including
-  formal checks and PHPUnit (30 tests, 70 assertions).
+- Routine PR CI for PR #13 (the prior 0.1.6 change): **passed** on Moodle 5.2
+  x MariaDB, including formal checks and PHPUnit (30 tests, 70 assertions).
+  Routine CI for this 1.1 pull request is tracked separately; see the PR's
+  STOP REPORT for its exact result.
 - Release QA workflow: **exists on this branch, not yet runnable**
   (`workflow_dispatch` workflows only become runnable once merged to the
   default branch) — pending post-merge execution.
@@ -214,10 +239,16 @@ As of this document's current revision:
   release QA workflow.
 - Manual upgrade/developer-debugging QA: **not executed** — procedure
   documented above.
-- Privacy Data registry check: **not executed** — procedure documented
-  above; automated metadata regression test exists and passes in routine CI.
+- Privacy registry compliance fix (#14): **automated `component_is_compliant()`
+  regression added and passing pre-merge**; the real staging Data registry /
+  Plugin privacy registry visual check is **not yet executed** — the staging
+  site still runs the prior 0.1.6 build, which is known non-compliant, until
+  this fix is merged and redeployed.
 - Public Marketplace source/documentation/tracker URLs: **outstanding** — the
   current GitHub repository and issue tracker are private.
 - Screenshots: **not captured**.
 - Marketplace metadata: **partially drafted** (section 4), not
   finalised/published.
+- `$plugin->maturity`: **MATURITY_STABLE** (release metadata for 1.1 per
+  #14) — not equivalent to the release gate above being complete; #6 remains
+  open.

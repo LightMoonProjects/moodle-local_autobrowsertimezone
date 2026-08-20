@@ -47,7 +47,7 @@ workflow exists" as equivalent to "the matrix has passed".
       RELEASE_QA.md; do not mark this complete from the workflow merely
       existing). This provides clean-install and PHPUnit evidence across the
       full declared Moodle/database range.
-- [ ] Execute the documented manual 0.1.5 → current upgrade QA on Moodle 4.5 with both MariaDB and PostgreSQL, plus browser/UI install smoke on the minimum and a current supported Moodle release; expand to additional branches if the matrix or staging QA exposes a version-specific concern (RELEASE_QA.md section 2).
+- [ ] Execute the documented manual 0.1.6 → 1.1 upgrade QA on Moodle 4.5 with both MariaDB and PostgreSQL, plus browser/UI install smoke on the minimum and a current supported Moodle release; expand to additional branches if the matrix or staging QA exposes a version-specific concern (RELEASE_QA.md section 2).
 - [ ] Run Moodle Code Checker / PHPCS and resolve all actionable findings.
 - [ ] Run Moodle JavaScript lint and Grunt build; verify `amd/build` exactly matches `amd/src`.
 - [ ] Run PHP lint across all PHP files.
@@ -58,10 +58,19 @@ workflow exists" as equivalent to "the matrix has passed".
 - [ ] Test Moodle forced timezone configuration.
 - [ ] Test admin "login as" behaviour.
 - [ ] Test authentication methods used by target sites and confirm the plugin does not conflict with externally managed profile policy.
-- [ ] Verify privacy metadata with Moodle's Data registry page (RELEASE_QA.md section 3); automated metadata regression coverage already exists (`tests/privacy_provider_test.php`).
+- [ ] Verify privacy metadata and Plugin privacy registry compliance with Moodle's Data
+      registry / Plugin privacy registry pages (RELEASE_QA.md section 3). Automated
+      regression coverage exists (`tests/privacy_provider_test.php`), including a direct
+      `core_privacy\manager::component_is_compliant()` check added while fixing #14; the
+      real staging visual check (red non-compliance warning gone) is still pending
+      post-merge redeployment, not yet executed.
 - [ ] Confirm publicly accessible Marketplace source, documentation, and issue-tracker URLs. The current GitHub repository and issue tracker are private and must not be described as public (RELEASE_QA.md section 4).
 - [ ] Prepare Marketplace short description, full description, and real screenshots (metadata is partially drafted in RELEASE_QA.md section 4; screenshots and public URLs remain outstanding).
-- [ ] Change maturity from `MATURITY_ALPHA` only after staging/compatibility QA supports doing so.
+- [ ] `$plugin->maturity` was raised to `MATURITY_STABLE` as part of the 1.1 release metadata
+      target (#14). This is release metadata only, not evidence that the broader Marketplace
+      release gate below it has passed -- the release QA matrix, install/upgrade QA, staging
+      privacy re-verification and screenshots must still be completed before Marketplace
+      submission (#6).
 - [ ] Create a tagged release and build the Marketplace ZIP from that tag.
 
 ## Marketplace metadata draft

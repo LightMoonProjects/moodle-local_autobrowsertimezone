@@ -2,6 +2,42 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.1 - 2026-08-20
+
+- Fixed: the Privacy API provider implemented only
+  `\core_privacy\local\metadata\provider`, which `core_privacy\manager::component_is_compliant()`
+  does not accept on its own (compliance requires either `null_provider`, or a metadata
+  provider combined with a `\core_privacy\local\request\data_provider` descendant). This left
+  the plugin flagged with a red non-compliance warning in Moodle's Plugin privacy registry
+  (`component_is_compliant('local_autobrowsertimezone')` returned `false`), discovered during
+  real Moodle 5.2.2 staging QA for #6. Fixed by additionally implementing
+  `\core_privacy\local\request\plugin\provider`, the narrowest Moodle-supported concrete
+  provider contract for a plugin with no independently owned personal-data records --
+  verified identical on Moodle 4.5 and 5.2 core source. `null_provider` was rejected because
+  the plugin does process/write personal data through `core_user`; directly implementing the
+  base marker interfaces `data_provider`/`shared_data_provider` was rejected because Moodle
+  core documents them as not intended to be implemented directly.
+- The existing `core_user` subsystem metadata link for `timezone` is unchanged. The new
+  `get_contexts_for_userid()`, `export_user_data()`, `delete_data_for_all_users_in_context()`
+  and `delete_data_for_user()` methods are no-ops: the plugin owns no independently
+  retrievable personal-data record of its own (no plugin table, preference, file area, cache
+  entry, or external-service record), and the persistent `user.timezone` value is already
+  exported and deleted/anonymised by `core_user`'s own privacy provider. `core_userlist_provider`
+  was deliberately not added, since the plugin has no context-scoped list of affected users of
+  its own to report.
+- Added PHPUnit coverage exercising `core_privacy\manager::component_is_compliant()` directly
+  (the actual registry-compliance regression, not just interface introspection), plus direct
+  coverage of `get_contexts_for_userid()`, `export_user_data()`, `delete_data_for_user()` and
+  `delete_data_for_all_users_in_context()` proving the user's timezone and an unrelated core
+  profile field are never mutated by this plugin's own request-provider methods.
+- Raised `$plugin->release` from `0.1.6` to `1.1` and `$plugin->version` from `2026082006` to
+  `2026082007`, and changed `$plugin->maturity` from `MATURITY_ALPHA` to `MATURITY_STABLE` for
+  this release target. This maturity change reflects this release's own metadata only; it is
+  not evidence that the broader Marketplace release gate in #6 (release QA matrix execution,
+  install/upgrade QA, staging privacy re-verification, screenshots) has been completed, and
+  #6 remains open. Staging re-verification of the registry-compliance fix itself is pending
+  post-merge redeployment.
+
 ## 0.1.6 - 2026-08-20
 
 - Fixed: `manager::should_run()` called a non-existent global `isloggedinas()`
