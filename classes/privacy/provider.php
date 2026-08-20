@@ -50,8 +50,8 @@ use core_privacy\local\request\contextlist;
  * @license    https://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 final class provider implements
-        \core_privacy\local\metadata\provider,
-        \core_privacy\local\request\plugin\provider {
+    \core_privacy\local\metadata\provider,
+    \core_privacy\local\request\plugin\provider {
     /**
      * Describe personal data processed by this plugin.
      *
