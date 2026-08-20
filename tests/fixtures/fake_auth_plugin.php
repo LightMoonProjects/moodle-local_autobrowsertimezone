@@ -32,6 +32,9 @@ class local_autobrowsertimezone_fake_auth_plugin extends auth_plugin_base {
     /** @var bool Value user_update() should return. */
     protected $acceptupdate;
 
+    /** @var bool Value can_edit_profile() should return. */
+    protected $caneditprofile;
+
     /** @var stdClass|null Old user object received by the last user_update() call. */
     public $lastolduser = null;
 
@@ -41,12 +44,27 @@ class local_autobrowsertimezone_fake_auth_plugin extends auth_plugin_base {
     /**
      * Create the deterministic authentication-plugin test double.
      *
+     * No core-shipped auth plugin overrides can_edit_profile() to false
+     * without a live external dependency, so $caneditprofile lets tests
+     * exercise that policy branch deterministically.
+     *
      * @param bool $acceptupdate Whether user_update() should accept (true) or reject (false) the change.
+     * @param bool $caneditprofile Whether can_edit_profile() should return true or false.
      */
-    public function __construct(bool $acceptupdate) {
+    public function __construct(bool $acceptupdate, bool $caneditprofile = true) {
         $this->authtype = 'fake';
         $this->config = new stdClass();
         $this->acceptupdate = $acceptupdate;
+        $this->caneditprofile = $caneditprofile;
+    }
+
+    /**
+     * Whether this plugin allows the user's profile to be edited.
+     *
+     * @return bool
+     */
+    public function can_edit_profile() {
+        return $this->caneditprofile;
     }
 
     /**
