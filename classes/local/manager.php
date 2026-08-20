@@ -147,7 +147,7 @@ final class manager {
      * @return array{changed: bool, timezone: string, reason: string}
      */
     public static function update_current_user_timezone(string $timezone): array {
-        global $CFG, $USER;
+        global $USER;
 
         if (!self::should_run()) {
             return [
@@ -165,7 +165,13 @@ final class manager {
             );
         }
 
-        if ((string)($USER->timezone ?? '99') === $timezone) {
+        // Load the authoritative pre-change record (rather than trusting the
+        // cached $USER global) so a concurrent request that already applied
+        // the same change is observed as a no-op, and so the active
+        // authentication plugin below receives a genuine old/new pair.
+        $olduser = \core_user::get_user((int)$USER->id, '*', MUST_EXIST);
+
+        if ((string)($olduser->timezone ?? '99') === $timezone) {
             return [
                 'changed' => false,
                 'timezone' => $timezone,
@@ -173,18 +179,58 @@ final class manager {
             ];
         }
 
+        $authplugin = get_auth_plugin((string)$olduser->auth);
+        $result = self::apply_timezone_change($olduser, $timezone, $authplugin);
+
+        if ($result['changed']) {
+            // Keep the current request's user object consistent with the database.
+            $USER->timezone = $result['timezone'];
+        }
+
+        return $result;
+    }
+
+    /**
+     * Persist a validated timezone change, honouring the active
+     * authentication plugin's user_update() contract.
+     *
+     * Mirrors the old/new user record pattern Moodle's own profile-edit
+     * flow (user/edit.php) uses: the active authentication plugin is given
+     * the normal opportunity to accept, propagate, or reject the change
+     * before the local {user} record is touched. Moodle core's
+     * user_update_user() never calls the authentication plugin itself, so
+     * this step cannot be skipped without silently diverging from an
+     * authoritative external source (see auth_plugin_base::user_update()).
+     *
+     * @param \stdClass $olduser Full pre-change user record.
+     * @param string $timezone Already-validated target timezone.
+     * @param \auth_plugin_base $authplugin Active authentication plugin for $olduser.
+     * @return array{changed: bool, timezone: string, reason: string}
+     */
+    public static function apply_timezone_change(
+        \stdClass $olduser,
+        string $timezone,
+        \auth_plugin_base $authplugin
+    ): array {
+        global $CFG;
+
+        $newuser = clone $olduser;
+        $newuser->timezone = $timezone;
+
+        if (!$authplugin->user_update($olduser, $newuser)) {
+            // The auth plugin rejected or failed to propagate the change upstream;
+            // do not commit a local-only timezone that would diverge from it.
+            return [
+                'changed' => false,
+                'timezone' => (string)($olduser->timezone ?? '99'),
+                'reason' => 'authrejected',
+            ];
+        }
+
         require_once($CFG->dirroot . '/user/lib.php');
 
-        $update = (object)[
-            'id' => (int)$USER->id,
-            'timezone' => $timezone,
-        ];
-
         // Do not touch the password; trigger Moodle's standard user_updated event.
-        user_update_user($update, false, true);
-
-        // Keep the current request's user object consistent with the database.
-        $USER->timezone = $timezone;
+        user_update_user($newuser, false, true);
 
         return [
             'changed' => true,
