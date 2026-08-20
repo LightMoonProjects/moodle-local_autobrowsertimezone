@@ -15,10 +15,11 @@ When the plugin is enabled:
 1. An eligible logged-in Moodle web page loads.
 2. The browser reports its current IANA timezone, for example `Australia/Sydney`.
 3. If it differs from the user's Moodle profile timezone, Moodle validates the value against its supported timezone list.
-4. The current user's existing Moodle profile timezone is updated through Moodle's user API.
-5. By default the page reloads once so server-rendered dates immediately use the new timezone.
+4. The active authentication plugin is given the same old/new user record it would receive from Moodle's own profile-edit page, so it can accept, propagate, or reject the change.
+5. The current user's Moodle profile timezone is updated through Moodle's user API only after that authentication-plugin update succeeds.
+6. By default the page reloads once so server-rendered dates immediately use the new timezone.
 
-The plugin does not change a timezone when Moodle has a forced timezone configured. It also respects authentication-plugin profile ownership/locking for the timezone field, and skips guests, suspended/deleted users, MNet remote users, CLI requests, and sessions where an administrator is logged in as another user.
+The plugin does not change a timezone when Moodle has a forced timezone configured. It also respects authentication-plugin profile ownership/locking for the timezone field, and skips guests, suspended/deleted users, MNet remote users, CLI requests, and sessions where an administrator is logged in as another user. If the active authentication plugin rejects or fails to propagate the change (for example, an externally managed account configured to update timezone upstream), Moodle's profile timezone is left exactly as it was; no local-only value is committed.
 
 ## Requirements and supported Moodle versions
 
