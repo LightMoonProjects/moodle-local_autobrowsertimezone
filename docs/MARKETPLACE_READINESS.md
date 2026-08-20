@@ -2,6 +2,8 @@
 
 This project is being developed for publication in Moodle Marketplace. The repository should be treated as pre-release until the checklist below is complete.
 
+See [RELEASE_QA.md](RELEASE_QA.md) for the concrete, repeatable release-gate procedure (release QA workflow, install/upgrade QA, privacy QA, Marketplace metadata draft) referenced throughout this checklist.
+
 ## Baseline already designed into the plugin
 
 - Correct Frankenstyle component: `local_autobrowsertimezone`.
@@ -19,11 +21,32 @@ This project is being developed for publication in Moodle Marketplace. The repos
 - "Login as" and MNet remote-user sessions are excluded from automatic writes.
 - Public GitHub issue tracker and repository documentation.
 - Supported Moodle range declared in `version.php`.
-- GitHub Actions uses Moodle Plugin CI across Moodle 4.5, 5.0, 5.1 and 5.2 with PostgreSQL and MariaDB.
+
+## CI: routine vs release QA
+
+**Routine CI** (`.github/workflows/moodle-plugin-ci.yml`) runs automatically
+on every push/PR and is intentionally lightweight: a single job on
+**Moodle 5.2 x MariaDB**, covering PHP lint, PHPCS, PHPDoc, plugin
+validation, savepoints, JS lint/Grunt, and PHPUnit. It does **not** cover
+Moodle 4.5/5.0/5.1 or PostgreSQL — running the full matrix on every commit
+was found to be disproportionate for routine development.
+
+**Release QA** (`.github/workflows/moodle-plugin-release-qa.yml`) is a
+separate, manually-triggered (`workflow_dispatch` only) workflow that proves
+the full declared **Moodle 4.5-5.2 x PostgreSQL/MariaDB** range before a
+Marketplace release. See [RELEASE_QA.md](RELEASE_QA.md) for how to run it
+and its current execution status — a `workflow_dispatch` workflow only
+becomes runnable once its file exists on the default branch, so its
+release-matrix evidence may be pending post-merge; do not treat "the
+workflow exists" as equivalent to "the matrix has passed".
 
 ## Required before first Marketplace release
 
-- [ ] Test installation and upgrade on clean Moodle 4.5, 5.0, 5.1, and 5.2 sites.
+- [ ] Run the release QA workflow and confirm every one of the 8
+      Moodle-branch x database legs completed successfully (see
+      RELEASE_QA.md; do not mark this complete from the workflow merely
+      existing).
+- [ ] Test installation and upgrade on clean Moodle 4.5, 5.0, 5.1, and 5.2 sites (RELEASE_QA.md section 2).
 - [ ] Run Moodle Code Checker / PHPCS and resolve all actionable findings.
 - [ ] Run Moodle JavaScript lint and Grunt build; verify `amd/build` exactly matches `amd/src`.
 - [ ] Run PHP lint across all PHP files.
@@ -34,21 +57,11 @@ This project is being developed for publication in Moodle Marketplace. The repos
 - [ ] Test Moodle forced timezone configuration.
 - [ ] Test admin "login as" behaviour.
 - [ ] Test authentication methods used by target sites and confirm the plugin does not conflict with externally managed profile policy.
-- [ ] Verify privacy metadata with Moodle Privacy API utilities.
-- [ ] Prepare Marketplace short description, full description, screenshots, documentation URL, source URL, and public tracker URL.
+- [ ] Verify privacy metadata with Moodle's Data registry page (RELEASE_QA.md section 3); automated metadata regression coverage already exists (`tests/privacy_provider_test.php`).
+- [ ] Prepare Marketplace short description, full description, screenshots, documentation URL, source URL, and public tracker URL (drafted in RELEASE_QA.md section 4; screenshots outstanding).
 - [ ] Change maturity from `MATURITY_ALPHA` only after staging/compatibility QA supports doing so.
 - [ ] Create a tagged release and build the Marketplace ZIP from that tag.
 
 ## Marketplace metadata draft
 
-**Name:** Automatic browser timezone
-
-**Short description:** Keeps each user's Moodle profile timezone aligned with the timezone reported by their browser/device, without GPS, IP geolocation, or external APIs.
-
-**Plugin type:** Local plugin
-
-**Component:** `local_autobrowsertimezone`
-
-**License:** GNU GPL v3 or later
-
-**Source / documentation / issue tracker:** GitHub repository and GitHub Issues.
+See [RELEASE_QA.md](RELEASE_QA.md) section 4 for the full draft (name, short/full description, source/documentation/tracker URLs, supported versions, privacy statement, installation summary, and screenshot status).
