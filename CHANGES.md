@@ -2,6 +2,45 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.1.6 - 2026-08-20
+
+- Fixed: `manager::should_run()` called a non-existent global `isloggedinas()`
+  function, which would throw a fatal error for any real (non-CLI) request
+  by a logged-in, non-guest, non-deleted/suspended user with the plugin
+  enabled -- the plugin's entire intended common case. Replaced with the
+  correct `\core\session\manager::is_loggedinas()`. This was never caught by
+  automated tests because Moodle PHPUnit defines `CLI_SCRIPT`, which
+  `should_run()` short-circuits on before reaching this check. Discovered
+  and fixed while expanding automated test coverage for Issue #6.
+- Expanded PHPUnit coverage: plugin-disabled, guest, deleted, suspended,
+  login-as, MNet remote user, forced timezone, and
+  auth-plugin `can_edit_profile() = false` eligibility branches; invalid
+  timezone rejection and the unchanged-timezone no-op at the actual
+  production mutation boundary; `core\event\user_updated` emission on
+  successful persistence (and non-emission on a no-op); and Privacy API
+  metadata regression coverage.
+- `manager::should_run()` and `manager::update_current_user_timezone()` were
+  each split into a thin public CLI/eligibility-gated wrapper plus a private,
+  independently testable policy method (`is_eligible_for_sync()`,
+  `apply_validated_timezone_request()`); `can_update_timezone_for_auth_plugin()`
+  now delegates to a new `auth_plugin_permits_timezone_edit()` that accepts
+  an explicit auth-plugin instance. These are pure extractions with no
+  behavioural change to any public method.
+- Added a manually-triggered `Moodle Plugin Release QA` GitHub Actions
+  workflow (`.github/workflows/moodle-plugin-release-qa.yml`,
+  `workflow_dispatch` only) covering the full declared Moodle 4.5-5.2 x
+  PostgreSQL/MariaDB compatibility matrix plus formal prechecks, without
+  adding cost to routine per-PR CI.
+- Corrected `docs/RETRY_GUARD_QA.md` Scenario E: `sessionStorage` is scoped
+  per top-level browsing context, so two independently opened tabs cannot
+  reliably demonstrate the concurrent-request guard; the scenario now
+  reproduces it within a single tab.
+- Updated `docs/MARKETPLACE_READINESS.md` to accurately distinguish routine
+  CI (Moodle 5.2 x MariaDB, every push/PR) from release QA (full declared
+  range, manually triggered before a Marketplace release); added
+  `docs/RELEASE_QA.md` documenting the concrete, repeatable release-gate
+  procedure.
+
 ## 0.1.5 - 2026-08-20
 
 - The browser timezone sync retry guard now distinguishes a generic AJAX

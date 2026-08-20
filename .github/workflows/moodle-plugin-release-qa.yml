@@ -1,0 +1,198 @@
+name: Moodle Plugin Release QA
+
+# Manually-triggered release gate proving the full declared Moodle/database
+# compatibility range (Marketplace readiness, Issue #6). Routine CI on every
+# push/PR intentionally stays a single lightweight job
+# (moodle-plugin-ci.yml: MOODLE_502_STABLE x MariaDB); this workflow is where
+# the broader Moodle 4.5-5.2 x PostgreSQL/MariaDB matrix belongs, run only
+# before a Marketplace release, not on every commit.
+#
+# Split into two jobs so version/database-independent formal checks
+# (phplint, phpcs, phpdoc, validate, savepoints, grunt) run exactly once
+# rather than being duplicated across all 8 compatibility legs:
+#   1. formal-checks - static/formal prechecks on one representative
+#      environment.
+#   2. compatibility  - installs the plugin and runs the PHPUnit suite on
+#      every declared supported Moodle branch x database combination.
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: moodle-plugin-release-qa
+  cancel-in-progress: false
+
+jobs:
+  formal-checks:
+    name: Formal prechecks (MOODLE_502_STABLE, mariadb)
+    runs-on: [self-hosted, Linux, X64, dev-ci-runner]
+
+    services:
+      mariadb:
+        image: mariadb:11
+        env:
+          MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: '1'
+          MYSQL_CHARACTER_SET_SERVER: utf8mb4
+          MYSQL_COLLATION_SERVER: utf8mb4_unicode_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 3
+
+    steps:
+      - name: Check out plugin
+        uses: actions/checkout@v6
+        with:
+          path: plugin
+          persist-credentials: false
+
+      - name: Setup PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          ini-values: max_input_vars=5000, opcache.enable_cli=1
+          coverage: none
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Initialise Moodle Plugin CI
+        run: |
+          CI_DIR="$RUNNER_TEMP/moodle-plugin-ci"
+          rm -rf "$CI_DIR"
+          composer create-project -n --no-dev --prefer-dist moodlehq/moodle-plugin-ci "$CI_DIR" ^4
+          echo "$CI_DIR/bin" >> "$GITHUB_PATH"
+          echo "$CI_DIR/vendor/bin" >> "$GITHUB_PATH"
+          sudo locale-gen en_AU.UTF-8
+
+      - name: Install test Moodle
+        run: |
+          rm -rf "$RUNNER_TEMP/moodle" "$RUNNER_TEMP/moodledata"
+          moodle-plugin-ci install \
+            --plugin ./plugin \
+            --moodle "$RUNNER_TEMP/moodle" \
+            --data "$RUNNER_TEMP/moodledata" \
+            --db-host=127.0.0.1
+        env:
+          DB: mariadb
+          MOODLE_BRANCH: MOODLE_502_STABLE
+
+      - name: PHP lint
+        if: ${{ !cancelled() }}
+        run: moodle-plugin-ci phplint
+
+      - name: Moodle Code Checker
+        if: ${{ !cancelled() }}
+        run: moodle-plugin-ci phpcs --max-warnings 0
+
+      - name: Moodle PHPDoc Checker
+        if: ${{ !cancelled() }}
+        run: moodle-plugin-ci phpdoc --max-warnings 0
+
+      - name: Plugin validation
+        if: ${{ !cancelled() }}
+        run: moodle-plugin-ci validate
+
+      - name: Upgrade savepoint validation
+        if: ${{ !cancelled() }}
+        run: moodle-plugin-ci savepoints
+
+      - name: JavaScript / Grunt checks
+        if: ${{ !cancelled() }}
+        run: moodle-plugin-ci grunt --max-lint-warnings 0
+
+  compatibility:
+    name: test (${{ matrix.moodle-branch }}, ${{ matrix.database }})
+    needs: formal-checks
+    runs-on: [self-hosted, Linux, X64, dev-ci-runner]
+
+    services:
+      postgres:
+        image: ${{ matrix.database == 'pgsql' && 'postgres:17' || '' }}
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 3
+
+      mariadb:
+        image: ${{ matrix.database == 'mariadb' && 'mariadb:11' || '' }}
+        env:
+          MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: '1'
+          MYSQL_CHARACTER_SET_SERVER: utf8mb4
+          MYSQL_COLLATION_SERVER: utf8mb4_unicode_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 3
+
+    strategy:
+      fail-fast: false
+      matrix:
+        moodle-branch:
+          - MOODLE_405_STABLE
+          - MOODLE_500_STABLE
+          - MOODLE_501_STABLE
+          - MOODLE_502_STABLE
+        database:
+          - pgsql
+          - mariadb
+
+    steps:
+      - name: Check out plugin
+        uses: actions/checkout@v6
+        with:
+          path: plugin
+          persist-credentials: false
+
+      - name: Setup PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          ini-values: max_input_vars=5000, opcache.enable_cli=1
+          coverage: none
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Initialise Moodle Plugin CI
+        run: |
+          CI_DIR="$RUNNER_TEMP/moodle-plugin-ci"
+          rm -rf "$CI_DIR"
+          composer create-project -n --no-dev --prefer-dist moodlehq/moodle-plugin-ci "$CI_DIR" ^4
+          echo "$CI_DIR/bin" >> "$GITHUB_PATH"
+          echo "$CI_DIR/vendor/bin" >> "$GITHUB_PATH"
+          sudo locale-gen en_AU.UTF-8
+
+      - name: Install test Moodle
+        run: |
+          rm -rf "$RUNNER_TEMP/moodle" "$RUNNER_TEMP/moodledata"
+          moodle-plugin-ci install \
+            --plugin ./plugin \
+            --moodle "$RUNNER_TEMP/moodle" \
+            --data "$RUNNER_TEMP/moodledata" \
+            --db-host=127.0.0.1
+        env:
+          DB: ${{ matrix.database }}
+          MOODLE_BRANCH: ${{ matrix.moodle-branch }}
+
+      - name: PHPUnit tests
+        run: moodle-plugin-ci phpunit --fail-on-warning

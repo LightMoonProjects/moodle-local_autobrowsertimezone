@@ -30,8 +30,6 @@ final class manager {
      * @return bool
      */
     public static function should_run(): bool {
-        global $CFG, $USER;
-
         if (during_initial_install()) {
             return false;
         }
@@ -39,6 +37,25 @@ final class manager {
         if (defined('CLI_SCRIPT') && CLI_SCRIPT) {
             return false;
         }
+
+        return self::is_eligible_for_sync();
+    }
+
+    /**
+     * The eligibility policy portion of should_run(), excluding the
+     * install-time and CLI_SCRIPT guards.
+     *
+     * Split out purely so this policy can be exercised directly by tests:
+     * Moodle PHPUnit defines CLI_SCRIPT, so should_run() itself is
+     * unconditionally false there and cannot otherwise prove these branches
+     * behave correctly. should_run()'s public behaviour is unchanged by this
+     * split; the CLI_SCRIPT/install guards remain authoritative and are
+     * still checked first, in should_run(), for every real request.
+     *
+     * @return bool
+     */
+    private static function is_eligible_for_sync(): bool {
+        global $CFG, $USER;
 
         if (!(bool)get_config('local_autobrowsertimezone', 'enabled')) {
             return false;
@@ -53,7 +70,7 @@ final class manager {
         }
 
         // Never mutate the impersonated user's profile using the operator's browser timezone.
-        if (isloggedinas()) {
+        if (\core\session\manager::is_loggedinas()) {
             return false;
         }
 
@@ -98,8 +115,6 @@ final class manager {
     /**
      * Whether the current authentication plugin allows this timezone field to be changed.
      *
-     * This mirrors the lock handling used by Moodle's own user edit form.
-     *
      * @return bool
      */
     private static function can_update_timezone_for_auth_plugin(): bool {
@@ -107,6 +122,28 @@ final class manager {
 
         $authplugin = get_auth_plugin((string)($USER->auth ?? 'manual'));
 
+        return self::auth_plugin_permits_timezone_edit($authplugin, (string)($USER->timezone ?? ''));
+    }
+
+    /**
+     * Whether a specific authentication plugin instance permits the timezone
+     * field to be edited for a user whose current profile timezone is given.
+     *
+     * This mirrors the lock handling used by Moodle's own user edit form.
+     * Takes the auth plugin as an explicit parameter (mirroring
+     * apply_timezone_change()) so it can be exercised directly against a
+     * deterministic auth_plugin_base double: no core-shipped auth plugin
+     * overrides can_edit_profile() to false without a live external
+     * dependency, so this policy could not otherwise be proven for that case.
+     *
+     * @param \auth_plugin_base $authplugin Active authentication plugin.
+     * @param string $currenttimezone The user's current profile timezone value.
+     * @return bool
+     */
+    private static function auth_plugin_permits_timezone_edit(
+        \auth_plugin_base $authplugin,
+        string $currenttimezone
+    ): bool {
         if (!$authplugin->can_edit_profile()) {
             return false;
         }
@@ -117,7 +154,7 @@ final class manager {
             return false;
         }
 
-        if ($lock === 'unlockedifempty' && (string)($USER->timezone ?? '') !== '') {
+        if ($lock === 'unlockedifempty' && $currenttimezone !== '') {
             return false;
         }
 
@@ -176,6 +213,28 @@ final class manager {
                 'reason' => 'disabled',
             ];
         }
+
+        return self::apply_validated_timezone_request($timezone);
+    }
+
+    /**
+     * Validate and apply a timezone request for the current user, once
+     * should_run() has already confirmed the request is eligible.
+     *
+     * Split out from update_current_user_timezone() purely so this
+     * validation/mutation policy (invalid-timezone rejection, the
+     * unchanged-value no-op, and successful persistence) can be exercised
+     * directly by tests: Moodle PHPUnit defines CLI_SCRIPT, so
+     * update_current_user_timezone() is unconditionally 'disabled' there via
+     * should_run() and never reaches this logic. should_run() remains the
+     * sole, unmodified eligibility gate in update_current_user_timezone();
+     * this method assumes eligibility has already been confirmed.
+     *
+     * @param string $timezone Browser-provided timezone.
+     * @return array{changed: bool, timezone: string, reason: string}
+     */
+    private static function apply_validated_timezone_request(string $timezone): array {
+        global $USER;
 
         $timezone = (string)clean_param($timezone, PARAM_TIMEZONE);
 

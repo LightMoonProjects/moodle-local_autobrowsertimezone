@@ -118,12 +118,28 @@ a subsequent, independent page load.
 
 ## Scenario E — existing duplicate/concurrent guard (unchanged)
 
-1. With a fresh session and a real mismatch, load the page twice in quick
-   succession (or open two tabs) before the first request resolves.
-2. Expect at most one AJAX request to be sent for that exact mismatch key —
-   `beginAttempt()` claims the key as `guarded` synchronously before the
-   request is sent, so a duplicate concurrent/immediate request for the same
-   mismatch is still blocked, exactly as before.
+`sessionStorage` is scoped to a single top-level browsing context (tab): two
+independently opened tabs each get their own storage area and are **not** a
+reliable way to demonstrate this guard. Reproduce it within one tab instead:
+
+1. With a fresh session and a real mismatch, load the page once so the
+   `local_autobrowsertimezone/timezone` AMD module is present, but do this
+   step with the Network tab set to throttle/delay the request (or with a
+   breakpoint on the `Ajax.call` line) so the first request has not resolved
+   yet.
+2. While that first request is still pending, open the DevTools console in
+   the **same tab** and manually invoke the module a second time with the
+   same arguments it was originally called with, for example:
+   ```js
+   require(['local_autobrowsertimezone/timezone'], function(m) {
+       m.init({currentTimezone: '<old-tz>', reload: true});
+   });
+   ```
+3. Expect at most one AJAX request in the Network tab for that exact
+   mismatch key — `beginAttempt()` claims the key as `guarded` synchronously
+   before the first request is sent, so the second, manually-triggered call
+   within the same tab observes the key already claimed and returns
+   immediately without sending a duplicate request.
 
 ## Scenario F — persistent generic/transport failure (mandatory)
 
