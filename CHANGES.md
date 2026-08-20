@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## 0.1.2 - 2026-08-20
+## 0.1.3 - 2026-08-20
 
 - Remove the `require_login()` call from the `update_timezone` AJAX external
   function. Moodle's External API contract already enforces login through
@@ -11,6 +11,14 @@ All notable changes to this project will be documented in this file.
 - No behavioural change to authorisation: parameter validation, system-context
   validation and `moodle/user:editownprofile` capability enforcement are
   unchanged.
+
+## 0.1.2 - 2026-08-20
+
+- Route automatic timezone updates through the active authentication plugin's
+  `user_update($olduser, $newuser)` contract before persisting to Moodle,
+  matching the same old/new user pattern Moodle's own profile-edit page uses.
+- A rejected/failed authentication-plugin update now leaves the Moodle profile
+  timezone completely unchanged instead of committing a local-only value.
 
 ## 0.1.1 - 2026-08-20
 
