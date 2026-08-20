@@ -14,8 +14,6 @@
 // You should have received a copy of the GNU General Public License
 // along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
 
-defined('MOODLE_INTERNAL') || die();
-
 /**
  * Deterministic auth_plugin_base test double.
  *
@@ -41,6 +39,8 @@ class local_autobrowsertimezone_fake_auth_plugin extends auth_plugin_base {
     public $lastnewuser = null;
 
     /**
+     * Create the deterministic authentication-plugin test double.
+     *
      * @param bool $acceptupdate Whether user_update() should accept (true) or reject (false) the change.
      */
     public function __construct(bool $acceptupdate) {
@@ -49,6 +49,13 @@ class local_autobrowsertimezone_fake_auth_plugin extends auth_plugin_base {
         $this->acceptupdate = $acceptupdate;
     }
 
+    /**
+     * Record the proposed old/new user pair and return the configured outcome.
+     *
+     * @param stdClass $olduser Existing user record.
+     * @param stdClass $newuser Proposed updated user record.
+     * @return bool Whether the update is accepted.
+     */
     public function user_update($olduser, $newuser) {
         $this->lastolduser = $olduser;
         $this->lastnewuser = $newuser;
