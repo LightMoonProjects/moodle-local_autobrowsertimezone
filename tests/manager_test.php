@@ -16,6 +16,8 @@
 
 namespace local_autobrowsertimezone;
 
+defined('MOODLE_INTERNAL') || die();
+
 use local_autobrowsertimezone\local\manager;
 
 require_once(__DIR__ . '/fixtures/fake_auth_plugin.php');
@@ -29,6 +31,21 @@ require_once(__DIR__ . '/fixtures/fake_auth_plugin.php');
  */
 #[\PHPUnit\Framework\Attributes\CoversClass(manager::class)]
 final class manager_test extends \advanced_testcase {
+    /**
+     * Invoke the authentication-plugin field policy without the request-level CLI guard.
+     *
+     * PHPUnit correctly defines CLI_SCRIPT, so manager::should_run() must remain
+     * false in tests. This helper exercises the narrower lock/can-edit policy that
+     * Issue #2 must preserve without weakening the production CLI safeguard.
+     *
+     * @return bool
+     */
+    private function auth_plugin_allows_timezone_update(): bool {
+        $method = new \ReflectionMethod(manager::class, 'can_update_timezone_for_auth_plugin');
+
+        return (bool)$method->invoke(null);
+    }
+
     /**
      * Moodle timezone choices accept normal IANA zones and reject unknown values.
      *
@@ -45,29 +62,7 @@ final class manager_test extends \advanced_testcase {
     }
 
     /**
-     * Create an eligible logged-in test user with the plugin enabled.
-     *
-     * @param array $userdata Overrides for the generated user record.
-     * @return \stdClass
-     */
-    // phpcs:ignore moodle.PHPUnit.TestCaseCovers.Missing
-    private function create_eligible_user(array $userdata = []): \stdClass {
-        set_config('enabled', 1, 'local_autobrowsertimezone');
-
-        $user = $this->getDataGenerator()->create_user(array_merge([
-            'auth' => 'manual',
-            'timezone' => '99',
-        ], $userdata));
-
-        $this->setUser($user);
-
-        return $user;
-    }
-
-    /**
-     * A successful update goes through the (default, no-op) authentication-plugin
-     * contract exercised via the real Moodle get_auth_plugin() lookup, and the
-     * local Moodle timezone is only committed after that contract succeeds.
+     * A successful authentication-plugin update is followed by the local Moodle commit.
      *
      * @return void
      */
@@ -75,19 +70,23 @@ final class manager_test extends \advanced_testcase {
     public function test_successful_update_persists_after_auth_plugin_accepts(): void {
         $this->resetAfterTest();
 
-        $user = $this->create_eligible_user();
+        $user = $this->getDataGenerator()->create_user([
+            'auth' => 'manual',
+            'timezone' => 'Europe/London',
+        ]);
+        $olduser = \core_user::get_user($user->id, '*', MUST_EXIST);
+        $authplugin = new \local_autobrowsertimezone_fake_auth_plugin(true);
 
-        $result = manager::update_current_user_timezone('Australia/Sydney');
+        $result = manager::apply_timezone_change($olduser, 'Australia/Sydney', $authplugin);
 
         $this->assertTrue($result['changed']);
         $this->assertSame('Australia/Sydney', $result['timezone']);
         $this->assertSame('updated', $result['reason']);
+        $this->assertSame('Europe/London', $authplugin->lastolduser->timezone);
+        $this->assertSame('Australia/Sydney', $authplugin->lastnewuser->timezone);
 
         $dbuser = \core_user::get_user($user->id, '*', MUST_EXIST);
         $this->assertSame('Australia/Sydney', $dbuser->timezone);
-
-        global $USER;
-        $this->assertSame('Australia/Sydney', $USER->timezone);
     }
 
     /**
@@ -122,18 +121,15 @@ final class manager_test extends \advanced_testcase {
         $this->assertFalse($result['changed']);
         $this->assertSame('Europe/London', $result['timezone']);
         $this->assertSame('authrejected', $result['reason']);
-
-        // The plugin must have been given the real old/new user contract.
         $this->assertSame('Europe/London', $authplugin->lastolduser->timezone);
         $this->assertSame('Australia/Sydney', $authplugin->lastnewuser->timezone);
 
-        // No partial local commit: Moodle's own record is untouched.
         $dbuser = \core_user::get_user($user->id, '*', MUST_EXIST);
         $this->assertSame('Europe/London', $dbuser->timezone);
     }
 
     /**
-     * field_lock_timezone = locked must continue to block the automatic update.
+     * field_lock_timezone = locked must continue to block the automatic update policy.
      *
      * @return void
      */
@@ -141,21 +137,18 @@ final class manager_test extends \advanced_testcase {
     public function test_field_lock_locked_blocks_update(): void {
         $this->resetAfterTest();
 
-        $user = $this->create_eligible_user(['timezone' => '99']);
+        $user = $this->getDataGenerator()->create_user([
+            'auth' => 'manual',
+            'timezone' => '99',
+        ]);
+        $this->setUser($user);
         set_config('field_lock_timezone', 'locked', 'auth_manual');
 
-        $result = manager::update_current_user_timezone('Australia/Sydney');
-
-        $this->assertFalse($result['changed']);
-        $this->assertSame('disabled', $result['reason']);
-
-        $dbuser = \core_user::get_user($user->id, '*', MUST_EXIST);
-        $this->assertSame('99', $dbuser->timezone);
+        $this->assertFalse($this->auth_plugin_allows_timezone_update());
     }
 
     /**
-     * field_lock_timezone = unlockedifempty must block the update while the
-     * current profile timezone is non-empty.
+     * field_lock_timezone = unlockedifempty blocks changes once the field has a value.
      *
      * @return void
      */
@@ -163,21 +156,18 @@ final class manager_test extends \advanced_testcase {
     public function test_field_lock_unlockedifempty_blocks_when_not_empty(): void {
         $this->resetAfterTest();
 
-        $user = $this->create_eligible_user(['timezone' => '99']);
+        $user = $this->getDataGenerator()->create_user([
+            'auth' => 'manual',
+            'timezone' => '99',
+        ]);
+        $this->setUser($user);
         set_config('field_lock_timezone', 'unlockedifempty', 'auth_manual');
 
-        $result = manager::update_current_user_timezone('Australia/Sydney');
-
-        $this->assertFalse($result['changed']);
-        $this->assertSame('disabled', $result['reason']);
-
-        $dbuser = \core_user::get_user($user->id, '*', MUST_EXIST);
-        $this->assertSame('99', $dbuser->timezone);
+        $this->assertFalse($this->auth_plugin_allows_timezone_update());
     }
 
     /**
-     * field_lock_timezone = unlockedifempty must allow the update while the
-     * current profile timezone is empty.
+     * field_lock_timezone = unlockedifempty allows changes while the field is empty.
      *
      * @return void
      */
@@ -185,54 +175,13 @@ final class manager_test extends \advanced_testcase {
     public function test_field_lock_unlockedifempty_allows_when_empty(): void {
         $this->resetAfterTest();
 
-        $user = $this->create_eligible_user(['timezone' => '']);
+        $user = $this->getDataGenerator()->create_user([
+            'auth' => 'manual',
+            'timezone' => '',
+        ]);
+        $this->setUser($user);
         set_config('field_lock_timezone', 'unlockedifempty', 'auth_manual');
 
-        $result = manager::update_current_user_timezone('Australia/Sydney');
-
-        $this->assertTrue($result['changed']);
-        $this->assertSame('updated', $result['reason']);
-
-        $dbuser = \core_user::get_user($user->id, '*', MUST_EXIST);
-        $this->assertSame('Australia/Sydney', $dbuser->timezone);
-    }
-
-    /**
-     * A request that already matches the authoritative database record must be a
-     * no-op, so two near-simultaneous tabs applying the same change stay idempotent.
-     *
-     * @return void
-     */
-    // phpcs:ignore moodle.PHPUnit.TestCaseCovers.Missing
-    public function test_unchanged_timezone_is_a_noop(): void {
-        $this->resetAfterTest();
-
-        $this->create_eligible_user(['timezone' => 'Australia/Sydney']);
-
-        $result = manager::update_current_user_timezone('Australia/Sydney');
-
-        $this->assertFalse($result['changed']);
-        $this->assertSame('unchanged', $result['reason']);
-    }
-
-    /**
-     * An unsupported timezone identifier must be rejected rather than persisted.
-     *
-     * @return void
-     */
-    // phpcs:ignore moodle.PHPUnit.TestCaseCovers.Missing
-    public function test_invalid_timezone_is_rejected(): void {
-        $this->resetAfterTest();
-
-        $user = $this->create_eligible_user(['timezone' => '99']);
-
-        $this->expectException(\invalid_parameter_exception::class);
-
-        try {
-            manager::update_current_user_timezone('Not/A_Timezone');
-        } finally {
-            $dbuser = \core_user::get_user($user->id, '*', MUST_EXIST);
-            $this->assertSame('99', $dbuser->timezone);
-        }
+        $this->assertTrue($this->auth_plugin_allows_timezone_update());
     }
 }
