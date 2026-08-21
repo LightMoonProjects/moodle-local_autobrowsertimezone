@@ -16,7 +16,7 @@ concurrency:
 jobs:
   test:
     name: test (MOODLE_502_STABLE, mariadb)
-    runs-on: [self-hosted, Linux, X64, dev-ci-runner]
+    runs-on: ubuntu-24.04
 
     services:
       mariadb:
