@@ -28,7 +28,7 @@ concurrency:
 jobs:
   formal-checks:
     name: Formal prechecks (MOODLE_502_STABLE, mariadb)
-    runs-on: [self-hosted, Linux, X64, dev-ci-runner]
+    runs-on: ubuntu-24.04
 
     services:
       mariadb:
@@ -112,7 +112,7 @@ jobs:
   compatibility:
     name: test (${{ matrix.moodle-branch }}, ${{ matrix.database }})
     needs: formal-checks
-    runs-on: [self-hosted, Linux, X64, dev-ci-runner]
+    runs-on: ubuntu-24.04
 
     services:
       postgres:
