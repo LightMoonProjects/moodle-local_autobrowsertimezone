@@ -34,46 +34,47 @@ was found to be disproportionate for routine development.
 **Release QA** (`.github/workflows/moodle-plugin-release-qa.yml`) is a
 separate, manually-triggered (`workflow_dispatch` only) workflow that proves
 the full declared **Moodle 4.5-5.2 x PostgreSQL/MariaDB** range before a
-Marketplace release. See [RELEASE_QA.md](RELEASE_QA.md) for how to run it
-and its current execution status — a `workflow_dispatch` workflow only
-becomes runnable once its file exists on the default branch, so its
-release-matrix evidence may be pending post-merge; do not treat "the
-workflow exists" as equivalent to "the matrix has passed".
+Marketplace release. See [RELEASE_QA.md](RELEASE_QA.md) for how to run it and
+its execution status. Do not treat "the workflow exists" as equivalent to
+"the matrix has passed".
+
+**Manual compatibility evidence**: on 2026-08-21 the maintainer reported
+successful deployment and expected runtime behaviour on all eight declared
+Moodle/database combinations: Moodle 4.5, 5.0, 5.1 and 5.2 on both MariaDB
+and PostgreSQL. This is recorded as **USER-VERIFIED / MANUAL STAGING — 8/8
+PASS** in RELEASE_QA.md. It is useful compatibility evidence but is not a
+substitute for the separate release-QA workflow's repeatable clean-install +
+PHPUnit matrix.
 
 ## Required before first Marketplace release
 
 - [ ] Run the release QA workflow and confirm every one of the 8
       Moodle-branch x database legs completed successfully (see
       RELEASE_QA.md; do not mark this complete from the workflow merely
-      existing). This provides clean-install and PHPUnit evidence across the
-      full declared Moodle/database range.
-- [ ] Execute the documented manual 0.1.6 → 1.1 upgrade QA on Moodle 4.5 with both MariaDB and PostgreSQL, plus browser/UI install smoke on the minimum and a current supported Moodle release; expand to additional branches if the matrix or staging QA exposes a version-specific concern (RELEASE_QA.md section 2).
-- [ ] Run Moodle Code Checker / PHPCS and resolve all actionable findings.
+      existing). This provides repeatable clean-install and PHPUnit evidence
+      across the full declared Moodle/database range.
+- [ ] Execute the documented manual 0.1.6 → 1.1 upgrade QA on Moodle 4.5 with both MariaDB and PostgreSQL; the broader 8/8 manual compatibility deployment smoke is recorded separately and must not be silently treated as this exact upgrade-path evidence (RELEASE_QA.md section 2).
+- [ ] Run Moodle Code Checker / PHPCS and resolve all actionable findings for the release candidate.
 - [ ] Run Moodle JavaScript lint and Grunt build; verify `amd/build` exactly matches `amd/src`.
 - [ ] Run PHP lint across all PHP files.
-- [ ] Run PHPUnit tests on each supported Moodle branch.
-- [ ] Test with developer debugging enabled and confirm no notices/warnings/fatal errors.
-- [ ] Test MySQL/MariaDB and PostgreSQL environments (the plugin currently has no custom SQL or tables, but installation/runtime should still be verified).
+- [ ] Run PHPUnit tests on each supported Moodle branch through the release QA workflow or equivalent recorded execution.
+- [ ] Test with developer debugging enabled and confirm no notices/warnings/fatal errors for the documented release scenarios.
+- [x] Test MySQL/MariaDB and PostgreSQL environments — **USER-VERIFIED manual deployment/runtime smoke 8/8 PASS on 2026-08-21** across Moodle 4.5/5.0/5.1/5.2 x both database families. Automated release-QA execution remains a separate unchecked gate above.
 - [ ] Test users with `Server timezone`, an explicit timezone, and no `moodle/user:editownprofile` capability.
 - [ ] Test Moodle forced timezone configuration.
 - [ ] Test admin "login as" behaviour.
 - [ ] Test authentication methods used by target sites and confirm the plugin does not conflict with externally managed profile policy.
 - [ ] Verify privacy metadata and Plugin privacy registry compliance with Moodle's Data
       registry / Plugin privacy registry pages (RELEASE_QA.md section 3). Automated
-      regression coverage exists (`tests/privacy_provider_test.php`), including a direct
-      `core_privacy\manager::component_is_compliant()` check and a
-      `tool_dataprivacy\metadata_registry` `userlistnoncompliance` check added while fixing
-      #14. Pre-merge staging deployment of an earlier commit on the fix branch confirmed the
-      red non-compliance warning was gone but surfaced a second finding, "Userlist provider
-      missing", which required implementing `core_userlist_provider`; the real staging visual
-      re-check for the current commit is still pending redeployment, not yet executed.
+      regression coverage exists (`tests/privacy_provider_test.php`), including direct
+      `core_privacy\manager::component_is_compliant()` and
+      `tool_dataprivacy\metadata_registry` `userlistnoncompliance` checks. PR #15 / #14
+      is merged. Pre-merge staging on the final PR head was reported clean; retain an
+      exact merged-source deployment check as the final release record rather than
+      inferring it from the pre-merge environment.
 - [ ] Confirm publicly accessible Marketplace source, documentation, and issue-tracker URLs. The current GitHub repository and issue tracker are private and must not be described as public (RELEASE_QA.md section 4).
 - [ ] Prepare Marketplace short description, full description, and real screenshots (metadata is partially drafted in RELEASE_QA.md section 4; screenshots and public URLs remain outstanding).
-- [ ] `$plugin->maturity` was raised to `MATURITY_STABLE` as part of the 1.1 release metadata
-      target (#14). This is release metadata only, not evidence that the broader Marketplace
-      release gate below it has passed -- the release QA matrix, install/upgrade QA, staging
-      privacy re-verification and screenshots must still be completed before Marketplace
-      submission (#6).
+- [ ] `$plugin->maturity` is `MATURITY_STABLE` for the 1.1 release target. This is release metadata only, not evidence that the broader Marketplace release gate has passed; the remaining unchecked items still apply.
 - [ ] Create a tagged release and build the Marketplace ZIP from that tag.
 
 ## Marketplace metadata draft
