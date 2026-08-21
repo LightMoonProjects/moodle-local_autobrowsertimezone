@@ -5,11 +5,13 @@ This document describes the concrete, repeatable release gate for
 Marketplace release decision does not depend on ad hoc manual steps.
 
 The routine PR CI and automated PHPUnit/privacy regression coverage described
-below have run on the development branch where noted. The release-specific
-compatibility matrix and staging/manual steps have **not** yet been executed;
-see "Current status" at the end. This document is the procedure to follow and
-the record of what has/has not actually been run, not a claim that the plugin
-is release-ready.
+below have run where noted. In addition, the maintainer reported on
+2026-08-21 that manual deployment/runtime smoke passed on all eight declared
+Moodle/database combinations (Moodle 4.5-5.2 x MariaDB/PostgreSQL). That is
+recorded below as **USER-VERIFIED / MANUAL STAGING** evidence. The separate,
+repeatable release-QA workflow has not yet been recorded as executed, and the
+remaining release-specific manual gates are tracked below; this document must
+not turn manual evidence into an automated-CI claim.
 
 ## Automated vs manual vs outstanding
 
@@ -17,6 +19,7 @@ is release-ready.
 |---|---|---|
 | PHP lint, PHPCS, PHPDoc, plugin validation, savepoints, JS lint/Grunt, PHPUnit on Moodle 5.2 x MariaDB | `.github/workflows/moodle-plugin-ci.yml` | Automatic, every push/PR |
 | Same formal checks plus clean plugin install and PHPUnit on the full declared Moodle 4.5-5.2 x PostgreSQL/MariaDB matrix | `.github/workflows/moodle-plugin-release-qa.yml` | Manual (`workflow_dispatch`), before a release |
+| Manual deployment/runtime compatibility smoke across Moodle 4.5-5.2 x PostgreSQL/MariaDB | Maintainer staging environments | Manual; 8/8 reported PASS on 2026-08-21 |
 | Upgrade QA, developer-debugging QA, Privacy API Data registry check | This document | Manual, staging site |
 | Public Marketplace source/documentation/tracker URLs, screenshots, tagging, packaging, publishing | This document / repository release process | Manual, explicitly authorised only |
 
@@ -46,11 +49,30 @@ Two jobs:
    - Moodle 5.2 x MariaDB
    - Moodle 5.2 x PostgreSQL
 
-A workflow can only be run via `workflow_dispatch` once its YAML file exists
-on the repository's default branch, so this workflow cannot be executed
-until the pull request introducing it is merged to `main`. Until then, its
-release-matrix evidence is **pending post-merge**, not skipped — do not
-treat that as equivalent to a passing run.
+The workflow is now present on `main` and can be triggered manually. Its
+execution is a separate release artifact from the manual compatibility smoke
+below: do not treat the manual result as proof that the workflow's clean
+install + PHPUnit jobs have run.
+
+### Manual compatibility deployment evidence — 2026-08-21
+
+The maintainer reported deployment and expected runtime behaviour passing on
+every declared Moodle/database combination:
+
+| Moodle | MariaDB | PostgreSQL |
+|---|---|---|
+| 4.5 | PASS | PASS |
+| 5.0 | PASS | PASS |
+| 5.1 | PASS | PASS |
+| 5.2 | PASS | PASS |
+
+Evidence classification: **USER-VERIFIED / MANUAL STAGING — 8/8 PASS**.
+This establishes useful manual deployment/runtime compatibility across the
+full declared support range and both database families. Exact Moodle patch
+builds, PHP versions, database patch versions, and automated PHPUnit counts
+for these eight manual environments were not supplied with this record, so
+this evidence does **not** replace the release-QA workflow's repeatable clean
+install/PHPUnit matrix.
 
 ## 2. Install / upgrade QA
 
@@ -62,7 +84,8 @@ correctly afterwards, not about a schema migration.
 **Clean install across the declared support range** is part of the release QA
 workflow. Each of the 8 Moodle/database compatibility legs starts from a
 clean Moodle test installation and installs the plugin with
-`moodle-plugin-ci install` before running PHPUnit. Do not mark clean-install
+`moodle-plugin-ci install` before running PHPUnit. The manual deployment
+matrix above is separate evidence; do not mark the automated clean-install
 coverage complete until all 8 release-QA legs have actually completed
 successfully.
 
@@ -71,9 +94,11 @@ release QA, visit **Site administration → Notifications** as required,
 confirm no errors, then confirm the settings page (**Site administration →
 Plugins → Local plugins → Automatic browser timezone**) loads and the
 `enabled`/`reload` settings are present with their documented defaults
-(`enabled` off, `reload` on). At minimum exercise this browser/UI smoke on
-the minimum supported Moodle release and one current supported release so
-the non-CLI web path is covered.
+(`enabled` off, `reload` on). The maintainer reported expected runtime
+behaviour across all eight Moodle/database combinations on 2026-08-21; any
+release record that needs finer-grained browser scenario evidence should
+record those exact scenarios separately rather than infer them from this
+compatibility smoke.
 
 **Upgrade**: install the immediate previous release first, then upgrade to
 the current version in place and confirm the upgrade completes with no
@@ -85,13 +110,11 @@ real 0.1.6 commit:
 git show 3cf499f860001c19a8452e1cedfcfb3ac5c29fdd:. # 0.1.6 / 2026082006
 ```
 
-`3cf499f860001c19a8452e1cedfcfb3ac5c29fdd` is the current `main` commit on
-which this pull request is based and where `version.php` declares
-`2026082006` / `0.1.6`. Use that plugin tree as the previous version and the
-tip of the release candidate branch (currently 1.1 / 2026082007) as the
-upgrade target. This is an ordinary plugin version-number upgrade -- the
-plugin has no `db/upgrade.php` schema step, so no fake migration step is
-introduced solely for this version bump.
+`3cf499f860001c19a8452e1cedfcfb3ac5c29fdd` declares `2026082006` / `0.1.6`.
+Use that plugin tree as the previous version and the 1.1 / 2026082007 release
+source as the upgrade target. This is an ordinary plugin version-number
+upgrade -- the plugin has no `db/upgrade.php` schema step, so no fake
+migration step is introduced solely for this version bump.
 
 **Manual upgrade scope**: because the plugin has no plugin-owned schema or
 upgrade steps, manually repeating the same 0.1.6 → 1.1 upgrade on all eight
@@ -103,6 +126,12 @@ that matrix, developer debugging, or the minimum-version upgrade exposes a
 version-specific concern, expand upgrade testing to the affected branch(es)
 before release.
 
+A real 0.1.6 → 1.1 upgrade was previously verified on the Moodle 5.2.2
+Moodle-dev environment while testing #14. The specific Moodle 4.5 dual-DB
+upgrade evidence requested above is not established merely by the broader
+manual deployment matrix and remains a separate gate unless explicitly
+recorded.
+
 **Developer debugging**: with `$CFG->debug = DEBUG_DEVELOPER` and
 `$CFG->debugdisplay = 1`, exercise: a page load with a browser/profile
 timezone mismatch and the plugin enabled; a successful update; the settings
@@ -110,21 +139,18 @@ page; a page load with the plugin disabled; and a login-as session. Confirm
 no PHP notices/warnings, no fatal errors, and no unexpected `debugging()`
 output.
 
-These release/staging steps have not yet been executed; this is the procedure
-to run before a release, not a completed step.
-
 ## 3. Privacy QA
 
 `classes/privacy/provider.php` implements
 `\core_privacy\local\metadata\provider` (declaring a single `core_user`
 subsystem link covering the `timezone` field),
-`\core_privacy\local\request\plugin\provider` (the narrowest Moodle-supported
-request-provider contract for a plugin with no independently owned
-personal-data record), and `\core_privacy\local\request\core_userlist_provider`
-(required alongside `plugin\provider` — see below). All request-provider
-methods, including `get_users_in_context()`/`delete_data_for_users()`, are
-no-ops: the plugin owns no independently discoverable users or records of its
-own in any context.
+`\core_privacy\local\request\plugin\provider` (the Moodle plugin request
+provider contract), and `\core_privacy\local\request\core_userlist_provider`
+(required alongside `plugin\provider` by the Plugin privacy registry). All
+request-provider methods, including
+`get_users_in_context()`/`delete_data_for_users()`, are no-ops: the plugin
+owns no independently discoverable users or records of its own in any
+context.
 
 This was added to resolve
 [#14](https://github.com/LightMoonProjects/moodle-local_autobrowsertimezone/issues/14),
@@ -141,19 +167,17 @@ across two real Moodle 5.2.2 staging findings on the same branch:
 2. **"Userlist provider missing"**: deploying that fix pre-merge to staging
    confirmed `component_is_compliant()` now returns `true`, but the Plugin
    privacy registry additionally displayed **"Userlist provider missing"**.
-   `tool_dataprivacy\metadata_registry::get_registry_metadata()` (verified
-   identical on Moodle 4.5 and 5.2 core source) independently flags
-   `userlistnoncompliance` for any `core_user_data_provider` descendant —
-   which `plugin\provider` is — that does not also implement
-   `core_userlist_provider`, regardless of `component_is_compliant()`. An
-   earlier assumption that `core_userlist_provider` was "deliberately not
-   needed" was disproven by this real staging behaviour and has been
-   corrected: `core_userlist_provider` is now implemented.
+   `tool_dataprivacy\metadata_registry::get_registry_metadata()` independently
+   flags `userlistnoncompliance` for a `core_user_data_provider` descendant
+   that does not also implement `core_userlist_provider`. The provider now
+   implements `core_userlist_provider` with no-op user-list methods because
+   the plugin owns no independent user records.
 
-- **Automated (pre-merge)**: `tests/privacy_provider_test.php` asserts the
-  declared metadata collection contains exactly the `core_user` subsystem
-  link with the correct field mapping and summary and that the referenced
-  lang strings exist; asserts `core_privacy\manager::component_is_compliant('local_autobrowsertimezone')`
+- **Automated**: `tests/privacy_provider_test.php` asserts the declared
+  metadata collection contains exactly the `core_user` subsystem link with
+  the correct field mapping and summary and that the referenced lang strings
+  exist; asserts
+  `core_privacy\manager::component_is_compliant('local_autobrowsertimezone')`
   returns `true`; asserts the provider implements `plugin\provider` and
   `core_userlist_provider` and does not use `null_provider`; exercises
   `get_contexts_for_userid()`, `export_user_data()`, `delete_data_for_user()`,
@@ -162,22 +186,16 @@ across two real Moodle 5.2.2 staging findings on the same branch:
   timezone or an unrelated core profile field; and exercises
   `tool_dataprivacy\metadata_registry::get_registry_metadata()` itself to
   prove the component's registry entry no longer carries
-  `userlistnoncompliance`. These are regression checks that run pre-merge;
-  they do not replace the manual step below, which requires the fixed build
-  to actually be deployed.
-- **Manual (staging site, post-merge)**: as an admin, with the fixed/merged
-  build deployed, visit **Site administration → Users → Privacy and
-  policies → Data registry**, locate "Automatic browser timezone", and
-  confirm it shows the declared `core_user` subsystem link rather than "Not
-  implemented" or an error; also visit **Plugin privacy registry** and
-  confirm both the red non-compliance warning and "Userlist provider missing"
-  are gone. Not yet executed for the current commit — the staging site was
-  previously used to pre-merge-verify an earlier commit on this same branch
-  (`9aad71f3e16ca5378b2656b38b60248404703463`, which is where "Userlist
-  provider missing" was found) and must be redeployed with the exact new
-  commit before this step can be re-run.
-- `moodle-plugin-ci validate` (part of both CI workflows) also validates
-  that Privacy API metadata is present when profile data is touched.
+  `userlistnoncompliance`.
+- **Manual (staging site, merged build)**: with the exact merged source
+  deployed, visit **Site administration → Users → Privacy and policies → Data
+  registry** and **Plugin privacy registry**. Confirm the `core_user`
+  subsystem link remains present and both the red non-compliance warning and
+  "Userlist provider missing" are absent. Pre-merge staging on the final PR
+  head was reported as looking correct; the release record should still
+  distinguish that from an exact post-merge deployment check.
+- `moodle-plugin-ci validate` (part of both CI workflows) also validates that
+  Privacy API metadata is present when profile data is touched.
 
 ## 4. Marketplace metadata draft
 
@@ -224,61 +242,54 @@ publication time:
   complete the Moodle upgrade, then enable "Automatic browser timezone" and
   optionally "Reload after timezone change" at **Site administration →
   Plugins → Local plugins → Automatic browser timezone**.
-- **Screenshots**: **outstanding** — none captured. Screenshots require a
-  staged Moodle installation with the plugin's settings page and a visible
-  before/after timezone change; none is available in the environment that
-  prepared this document. Do not fabricate screenshots; capture real ones
-  from a staging site before publication.
+- **Screenshots**: **outstanding** — none are recorded in this repository
+  release evidence. Do not fabricate screenshots; capture real ones from a
+  staging site before publication.
 
 ## 5. Release decision gate
 
 `$plugin->maturity` was raised to `MATURITY_STABLE` as part of the 1.1
-release metadata target requested in #14. That change reflects this
-release's own metadata only. Do not tag a release or publish a Marketplace
-package until:
+release metadata target requested in #14. That change reflects this release's
+metadata only. Do not tag a release or publish a Marketplace package until:
 
-- the release QA workflow has actually run (not merely exists) and every
-  leg is confirmed green individually;
-- install/upgrade and developer-debugging QA (section 2) have actually been
-  executed with results recorded;
-- the Data registry / Plugin privacy registry manual check (section 3) has
-  actually been executed against the merged/deployed build;
-- publicly accessible source, documentation, and issue-tracker URLs have
-  been confirmed;
+- the release QA workflow has actually run (not merely exists) and every leg
+  is confirmed green individually;
+- the required upgrade and developer-debugging QA has actually been executed
+  with results recorded;
+- the Data registry / Plugin privacy registry manual check has been executed
+  against the exact merged/deployed build;
+- publicly accessible source, documentation, and issue-tracker URLs have been
+  confirmed;
 - real screenshots have been captured;
 - CHANGES.md and README.md accurately describe the release.
 
+The 8/8 manual deployment matrix recorded above is useful compatibility
+evidence, but it does not by itself satisfy the separate automated release-QA
+workflow, public-listing, screenshot, packaging, or exact post-merge gates.
+
 ## Current status
 
-As of this document's most recent update (1.1 / #14):
+As of 2026-08-21 for 1.1:
 
-- Routine PR CI for PR #13 (the prior 0.1.6 change): **passed** on Moodle 5.2
-  x MariaDB, including formal checks and PHPUnit (30 tests, 70 assertions).
-  Routine CI for this 1.1 pull request is tracked separately; see the PR's
-  STOP REPORT for its exact result.
-- Release QA workflow: **exists on this branch, not yet runnable**
-  (`workflow_dispatch` workflows only become runnable once merged to the
-  default branch) — pending post-merge execution.
-- Clean-install release matrix: **not executed** — covered by the pending
-  release QA workflow.
-- Manual upgrade/developer-debugging QA: **not executed** — procedure
-  documented above.
-- Privacy registry compliance fix (#14): **automated regression added and
-  passing pre-merge** for `component_is_compliant()`, the `plugin\provider`/
-  `core_userlist_provider` contract, and the `metadata_registry`
-  `userlistnoncompliance` check. Real pre-merge staging deployment of an
-  earlier commit on this branch (`9aad71f3e16ca5378b2656b38b60248404703463`)
-  confirmed `component_is_compliant()` returns `true`, but surfaced a second
-  finding — the Plugin privacy registry additionally showed **"Userlist
-  provider missing"** — which is fixed by this branch's current commit. The
-  real staging Plugin privacy registry visual re-check for the *current* PR
-  head is **not yet executed** — the staging site must be redeployed with the
-  exact new commit before that can be confirmed.
+- PR #15 / #14 privacy fix: **merged** to `main` as
+  `feaf98afde1603671a040a1bdf7b6b0e1a381d17`; #14 is closed.
+- Manual declared-range deployment/runtime compatibility:
+  **USER-VERIFIED 8/8 PASS** — Moodle 4.5, 5.0, 5.1 and 5.2 on both MariaDB
+  and PostgreSQL.
+- Release QA workflow: **available on `main`, execution not recorded here**.
+- Automated clean-install + PHPUnit release matrix: **not established by the
+  manual deployment result**; run/record the release QA workflow separately.
+- Specific Moodle 4.5 0.1.6 → 1.1 upgrade on both MariaDB and PostgreSQL:
+  **not recorded**. A real 0.1.6 → 1.1 upgrade on Moodle 5.2.2 was previously
+  verified while testing #14.
+- Privacy registry: automated regression is present; pre-merge staging on the
+  final PR head was reported clean. Exact post-merge deployment verification
+  remains a distinct release record unless separately confirmed.
 - Public Marketplace source/documentation/tracker URLs: **outstanding** — the
-  current GitHub repository and issue tracker are private.
-- Screenshots: **not captured**.
-- Marketplace metadata: **partially drafted** (section 4), not
-  finalised/published.
-- `$plugin->maturity`: **MATURITY_STABLE** (release metadata for 1.1 per
-  #14) — not equivalent to the release gate above being complete; #6 remains
-  open.
+  GitHub repository and issue tracker are still private.
+- Screenshots: **outstanding**.
+- Marketplace metadata: **partially drafted**, not finalised/published.
+- Tagged release / Marketplace package: **outstanding**.
+- `$plugin->maturity`: **MATURITY_STABLE** — release metadata only; Issue #6
+  remains open until the remaining applicable release gates above are
+  completed or explicitly re-scoped.
