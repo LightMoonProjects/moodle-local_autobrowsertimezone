@@ -182,6 +182,11 @@ export const init = (config) => {
     const safeConfig = config || {};
     const browserTimezone = getBrowserTimezone();
     const currentTimezone = String(safeConfig.currentTimezone || '99');
+    // Included in the guard key below so retry/loop state cannot leak
+    // between different Moodle accounts sharing the same browser tab (Issue
+    // #18): sessionStorage survives a logout/login in the same tab, but is
+    // not itself scoped to the authenticated user.
+    const userId = String(safeConfig.userid || '0');
 
     if (!browserTimezone || browserTimezone === currentTimezone) {
         return;
@@ -189,6 +194,7 @@ export const init = (config) => {
 
     const attemptKey = [
         'local_autobrowsertimezone',
+        userId,
         currentTimezone,
         browserTimezone,
     ].join(':');
