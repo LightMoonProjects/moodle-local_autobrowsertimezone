@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.1.3 - 2026-08-23
+
+- Fixed: the browser-side retry/loop guard in `amd/src/timezone.js` was keyed
+  only by the profile/browser timezone pair, so `sessionStorage` left by one
+  Moodle account could suppress a different account's genuine timezone sync
+  after logout/login in the same browser tab.
+- `manager::build_amd_config()` now passes the current authoritative user's
+  numeric `id` to the AMD module as `userid`; the AMD guard key is now
+  `local_autobrowsertimezone:<user-id>:<current-profile-tz>:<browser-tz>`.
+  Existing same-user bounded-retry, deterministic-error, and duplicate-call
+  guard semantics are unchanged. Legacy keys use a different string and are
+  simply no longer consulted.
+- `amd/build/timezone.min.js` and `amd/build/timezone.min.js.map` were
+  regenerated from `amd/src/timezone.js` with the CI-matching Moodle 5.2
+  Grunt toolchain, and Scenario G in `docs/RETRY_GUARD_QA.md` documents
+  cross-account guard-isolation QA.
+- Raised `$plugin->release` from `1.1.2` to `1.1.3` and `$plugin->version`
+  from `2026082300` to `2026082301`.
+
 ## 1.1.2 - 2026-08-23
 
 - Fixed: `manager::queue_browser_timezone_check()` and the authentication-plugin

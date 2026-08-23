@@ -202,7 +202,7 @@ final class manager {
      * unconditionally a no-op there via should_run() and never reaches this
      * logic.
      *
-     * @return array{currentTimezone: string, reload: bool}
+     * @return array{currentTimezone: string, reload: bool, userid: int}
      */
     private static function build_amd_config(): array {
         global $USER;
@@ -218,6 +218,10 @@ final class manager {
         return [
             'currentTimezone' => (string)($authoritativeuser->timezone ?? '99'),
             'reload' => (bool)get_config('local_autobrowsertimezone', 'reload'),
+            // Scope browser-side retry/loop state to the authenticated Moodle
+            // user so sessionStorage left by one account cannot suppress a
+            // different account after logout/login in the same tab (Issue #18).
+            'userid' => (int)$authoritativeuser->id,
         ];
     }
 

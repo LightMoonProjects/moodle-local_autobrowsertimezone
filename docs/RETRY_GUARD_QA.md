@@ -9,9 +9,14 @@ acceptance criteria.
 
 ## State machine
 
-Each browser/profile timezone mismatch is tracked independently, keyed by
-`local_autobrowsertimezone:<current-profile-tz>:<browser-tz>` in
-`sessionStorage`. The stored value is one of:
+Each browser/profile timezone mismatch, for the currently authenticated
+Moodle user, is tracked independently, keyed by
+`local_autobrowsertimezone:<user-id>:<current-profile-tz>:<browser-tz>` in
+`sessionStorage`. The `<user-id>` segment (Issue #18) prevents one account's
+guard/retry state from suppressing a different account's genuine mismatch
+after a logout/login in the same browser tab, since `sessionStorage` is
+scoped to the tab/origin, not to the authenticated account. The stored value
+is one of:
 
 - **(absent)** — no attempt has been made yet; a request may be sent.
 - **`guarded`** — this mismatch will not generate another request for the
@@ -65,7 +70,7 @@ a subsequent, independent page load.
    the site first, or open a new private/incognito window).
 2. Expect exactly one `local_autobrowsertimezone_update_timezone` AJAX
    request in the Network tab.
-3. Expect a `sessionStorage` key `local_autobrowsertimezone:<old-tz>:<new-tz>`
+3. Expect a `sessionStorage` key `local_autobrowsertimezone:<user-id>:<old-tz>:<new-tz>`
    set to `guarded`.
 4. Expect the response `changed` to be `true` and the page to reload exactly
    once.
@@ -83,7 +88,7 @@ a subsequent, independent page load.
 2. Expect the request to fail at the transport level (the browser console
    shows Moodle's standard exception notification, sourced from
    `core/notification`) — this rejection carries no Moodle `errorcode`.
-3. Inspect `sessionStorage`: the `local_autobrowsertimezone:<old-tz>:<new-tz>`
+3. Inspect `sessionStorage`: the `local_autobrowsertimezone:<user-id>:<old-tz>:<new-tz>`
    key must be set to `retry` — one later attempt is now permitted.
 4. Confirm no further request fires automatically on the same page (no
    immediate retry, no request storm).
@@ -132,7 +137,7 @@ reliable way to demonstrate this guard. Reproduce it within one tab instead:
    same arguments it was originally called with, for example:
    ```js
    require(['local_autobrowsertimezone/timezone'], function(m) {
-       m.init({currentTimezone: '<old-tz>', reload: true});
+       m.init({currentTimezone: '<old-tz>', reload: true, userid: <same-user-id>});
    });
    ```
 3. Expect at most one AJAX request in the Network tab for that exact
@@ -165,6 +170,32 @@ page load forever.
 5. Confirm this holds across at least 3-4 additional reloads to demonstrate
    the guard is not merely delayed but genuinely bounded.
 
+## Scenario G — guard state is isolated per Moodle account (Issue #18)
+
+This is the scenario the user-scoped guard key specifically targets: one
+account's guard/retry state must not suppress a different account's genuine
+mismatch in the same browser tab.
+
+1. Log in as **Account A**, with a profile timezone of `99` (Server
+   timezone) and a browser reporting `Australia/Sydney`.
+2. Load an eligible page: expect one AJAX request, resolving successfully.
+   Expect a `sessionStorage` key
+   `local_autobrowsertimezone:<A's user id>:99:Australia/Sydney` set to
+   `guarded`.
+3. Log out of Account A **in the same tab**, without closing it, then log in
+   as **Account B**, whose profile timezone is also `99`.
+4. Load an eligible page as Account B (same browser tab, same
+   `sessionStorage` area, same `99 -> Australia/Sydney` mismatch): expect a
+   **new** AJAX request to fire for Account B — the guard key now includes
+   `<B's user id>`, which is different from Account A's key, so Account A's
+   `guarded` entry is not consulted.
+5. Expect the response for Account B to resolve normally and follow the same
+   success/retry/permanent-failure semantics as Scenarios A-D, independently
+   of Account A's stored state.
+6. Confirm Account A's original key is still present and unaffected in
+   `sessionStorage` (it is simply a different, now-unused key; it is not
+   deleted or reset by Account B's activity).
+
 ## Expected outcome summary
 
 | Scenario | AJAX result | State after | Retried on next load? |
@@ -175,3 +206,4 @@ page load forever.
 | D. Moodle `errorcode` failure | rejected, `errorcode` set | `guarded` | no |
 | E. Concurrent load | guard blocks 2nd call | `guarded` by 1st call | n/a |
 | F. 2nd generic failure (persistent) | rejected, no `errorcode` | `guarded` | no (budget spent) |
+| G. Different account, same mismatch | resolved/rejected per that account's own outcome | independent per-user key | independent per-user key |
