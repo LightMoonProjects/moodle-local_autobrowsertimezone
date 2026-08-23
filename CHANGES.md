@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.1.2 - 2026-08-23
+
+- Fixed: `manager::queue_browser_timezone_check()` and the authentication-plugin
+  field-lock decision (`unlockedifempty` in particular) read the cached
+  `$USER->timezone`/`$USER->auth` session values instead of the authoritative
+  persisted `{user}` record. Reproduced on production release 1.1.1: an
+  unrelated profile-field plugin threw after Moodle had already persisted a
+  timezone change via `user_update_user()` but before `user/edit.php` reached
+  the code that refreshes `$USER`, leaving `$USER->timezone` stale relative to
+  the database. Because the browser also happened to match the stale session
+  value, the AMD module saw no mismatch and never queued a sync, leaving the
+  user on an outdated persisted timezone indefinitely.
+- `manager::is_eligible_for_sync()` now loads the authoritative user record
+  with `\core_user::get_user()` (matching the existing mutation-path pattern)
+  before evaluating `can_update_timezone_for_auth_plugin()`, and
+  `queue_browser_timezone_check()` was split into a thin wrapper plus a new
+  private `build_amd_config()` that sources `currentTimezone` from the same
+  authoritative record rather than `$USER`.
+- No change to eligibility safeguards, capability checks, forced-timezone
+  handling, or the mutation/persistence path itself.
+- Added focused PHPUnit regression coverage for both the stale-`$USER`
+  `unlockedifempty` field-lock decision and the stale-`$USER` AMD
+  configuration, each simulating the production divergence directly (persist
+  one timezone via `user_update_user()`, then desynchronise `$USER`).
+- Raised `$plugin->release` from `1.1.1` to `1.1.2` and `$plugin->version`
+  from `2026082200` to `2026082300`.
+
 ## 1.1 - 2026-08-20
 
 - Fixed: the Privacy API provider implemented only

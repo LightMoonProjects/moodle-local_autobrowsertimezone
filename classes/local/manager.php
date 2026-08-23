@@ -85,8 +85,15 @@ final class manager {
             return false;
         }
 
+        // Load the authoritative persisted user record rather than trusting the
+        // cached $USER global: a concurrent profile update elsewhere in the
+        // same request lifecycle can leave $USER stale relative to the
+        // database (see Issue #17), which would otherwise produce an
+        // incorrect field-lock decision below.
+        $authoritativeuser = \core_user::get_user((int)$USER->id, '*', MUST_EXIST);
+
         // Respect authentication-plugin ownership and locking of the core timezone profile field.
-        if (!self::can_update_timezone_for_auth_plugin()) {
+        if (!self::can_update_timezone_for_auth_plugin($authoritativeuser)) {
             return false;
         }
 
@@ -115,14 +122,18 @@ final class manager {
     /**
      * Whether the current authentication plugin allows this timezone field to be changed.
      *
+     * Takes the authoritative user record explicitly (rather than reading
+     * the cached $USER global) so the field-lock decision, in particular
+     * unlockedifempty, reflects the persisted profile state rather than a
+     * potentially stale session (see Issue #17).
+     *
+     * @param \stdClass $authoritativeuser Authoritative persisted user record.
      * @return bool
      */
-    private static function can_update_timezone_for_auth_plugin(): bool {
-        global $USER;
+    private static function can_update_timezone_for_auth_plugin(\stdClass $authoritativeuser): bool {
+        $authplugin = get_auth_plugin((string)($authoritativeuser->auth ?? 'manual'));
 
-        $authplugin = get_auth_plugin((string)($USER->auth ?? 'manual'));
-
-        return self::auth_plugin_permits_timezone_edit($authplugin, (string)($USER->timezone ?? ''));
+        return self::auth_plugin_permits_timezone_edit($authplugin, (string)($authoritativeuser->timezone ?? ''));
     }
 
     /**
@@ -167,7 +178,7 @@ final class manager {
      * @return void
      */
     public static function queue_browser_timezone_check(): void {
-        global $PAGE, $USER;
+        global $PAGE;
 
         if (!self::should_run()) {
             return;
@@ -176,11 +187,38 @@ final class manager {
         $PAGE->requires->js_call_amd(
             'local_autobrowsertimezone/timezone',
             'init',
-            [[
-                'currentTimezone' => (string)($USER->timezone ?? '99'),
-                'reload' => (bool)get_config('local_autobrowsertimezone', 'reload'),
-            ]]
+            [self::build_amd_config()]
         );
+    }
+
+    /**
+     * Build the configuration passed to the browser timezone AMD module,
+     * once should_run() has already confirmed the request is eligible.
+     *
+     * Split out purely so this authoritative-timezone construction (Issue
+     * #17) can be exercised directly by tests, for the same CLI_SCRIPT
+     * reason documented on apply_validated_timezone_request(): Moodle
+     * PHPUnit defines CLI_SCRIPT, so queue_browser_timezone_check() is
+     * unconditionally a no-op there via should_run() and never reaches this
+     * logic.
+     *
+     * @return array{currentTimezone: string, reload: bool}
+     */
+    private static function build_amd_config(): array {
+        global $USER;
+
+        // Load the authoritative persisted timezone rather than trusting the
+        // cached $USER global, which can be stale relative to the database
+        // (for example after a concurrent profile update elsewhere in the
+        // same request lifecycle never refreshed the session). A stale value
+        // here can otherwise make the browser wrongly believe there is no
+        // mismatch to synchronise.
+        $authoritativeuser = \core_user::get_user((int)$USER->id, '*', MUST_EXIST);
+
+        return [
+            'currentTimezone' => (string)($authoritativeuser->timezone ?? '99'),
+            'reload' => (bool)get_config('local_autobrowsertimezone', 'reload'),
+        ];
     }
 
     /**

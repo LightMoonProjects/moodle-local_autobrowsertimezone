@@ -38,12 +38,20 @@ final class manager_test extends \advanced_testcase {
      * false in tests. This helper exercises the narrower lock/can-edit policy that
      * Issue #2 must preserve without weakening the production CLI safeguard.
      *
+     * Loads the authoritative persisted user record the same way
+     * is_eligible_for_sync() does (Issue #17), rather than passing the
+     * cached $USER global, so callers can independently diverge $USER from
+     * the database to exercise the stale-session regression.
+     *
      * @return bool
      */
     private function auth_plugin_allows_timezone_update(): bool {
+        global $USER;
+
+        $authoritativeuser = \core_user::get_user((int)$USER->id, '*', MUST_EXIST);
         $method = new \ReflectionMethod(manager::class, 'can_update_timezone_for_auth_plugin');
 
-        return (bool)$method->invoke(null);
+        return (bool)$method->invoke(null, $authoritativeuser);
     }
 
     /**
@@ -100,6 +108,20 @@ final class manager_test extends \advanced_testcase {
         $method = new \ReflectionMethod(manager::class, 'apply_validated_timezone_request');
 
         return $method->invoke(null, $timezone);
+    }
+
+    /**
+     * Invoke the AMD-config construction policy directly, bypassing
+     * should_run(): Moodle PHPUnit defines CLI_SCRIPT, so
+     * queue_browser_timezone_check() is unconditionally a no-op there and
+     * never reaches this logic.
+     *
+     * @return array{currentTimezone: string, reload: bool}
+     */
+    private function build_amd_config(): array {
+        $method = new \ReflectionMethod(manager::class, 'build_amd_config');
+
+        return $method->invoke(null);
     }
 
     /**
@@ -239,6 +261,40 @@ final class manager_test extends \advanced_testcase {
         set_config('field_lock_timezone', 'unlockedifempty', 'auth_manual');
 
         $this->assertTrue($this->auth_plugin_allows_timezone_update());
+    }
+
+    /**
+     * A stale cached $USER->timezone must not incorrectly permit an
+     * unlockedifempty-locked field once the authoritative persisted timezone
+     * is non-empty. Reproduces the Issue #17 production scenario: a
+     * concurrent profile update already persisted a non-empty value, but
+     * $USER was never refreshed.
+     *
+     * @return void
+     */
+    // phpcs:ignore moodle.PHPUnit.TestCaseCovers.Missing
+    public function test_field_lock_unlockedifempty_uses_authoritative_timezone_not_stale_user(): void {
+        global $CFG, $USER;
+
+        $this->resetAfterTest();
+        require_once($CFG->dirroot . '/user/lib.php');
+
+        $user = $this->getDataGenerator()->create_user([
+            'auth' => 'manual',
+            'timezone' => '',
+        ]);
+        $this->setUser($user);
+        set_config('field_lock_timezone', 'unlockedifempty', 'auth_manual');
+
+        // Persist a non-empty timezone directly (simulating a concurrent
+        // update that completed in the database) without refreshing $USER.
+        $dbuser = \core_user::get_user($user->id, '*', MUST_EXIST);
+        $dbuser->timezone = 'Europe/London';
+        user_update_user($dbuser, false, false);
+        $USER->timezone = '';
+
+        $this->assertSame('Europe/London', \core_user::get_user($user->id, '*', MUST_EXIST)->timezone);
+        $this->assertFalse($this->auth_plugin_allows_timezone_update());
     }
 
     /**
@@ -633,5 +689,42 @@ final class manager_test extends \advanced_testcase {
         $this->assertSame((int)$user->id, (int)$updatedevents[0]->objectid);
         $this->assertSame((int)$user->id, (int)$updatedevents[0]->relateduserid);
         $this->assertSame('core', $updatedevents[0]->component);
+    }
+
+    /**
+     * Reproduces the Issue #17 production scenario directly: the persisted
+     * database timezone is Europe/London, but the cached $USER->timezone is
+     * still Australia/Sydney (for example because an unrelated failure
+     * elsewhere interrupted the normal $USER refresh after
+     * user_update_user()). The AMD module must be configured with the
+     * authoritative Europe/London value, not the stale session value.
+     *
+     * @return void
+     */
+    // phpcs:ignore moodle.PHPUnit.TestCaseCovers.Missing
+    public function test_build_amd_config_uses_authoritative_timezone_not_stale_user(): void {
+        global $CFG, $USER;
+
+        $this->resetAfterTest();
+        require_once($CFG->dirroot . '/user/lib.php');
+
+        $user = $this->getDataGenerator()->create_user([
+            'auth' => 'manual',
+            'timezone' => 'Australia/Sydney',
+        ]);
+        $this->setUser($user);
+        set_config('reload', 1, 'local_autobrowsertimezone');
+
+        // Persist the authoritative change directly, then desynchronise the
+        // cached session value to reproduce the stale-$USER condition.
+        $dbuser = \core_user::get_user($user->id, '*', MUST_EXIST);
+        $dbuser->timezone = 'Europe/London';
+        user_update_user($dbuser, false, false);
+        $USER->timezone = 'Australia/Sydney';
+
+        $config = $this->build_amd_config();
+
+        $this->assertSame('Europe/London', $config['currentTimezone']);
+        $this->assertTrue($config['reload']);
     }
 }
