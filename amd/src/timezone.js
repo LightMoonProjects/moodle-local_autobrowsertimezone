@@ -268,24 +268,24 @@ export const init = (config) => {
     Ajax.call([request])[0]
         .then((result) => {
             persistSuccessfulOutcome(attemptKey, result);
+            finishAttempt(attemptKey);
 
             if (result.changed && safeConfig.reload) {
                 window.location.reload();
             }
 
             return result;
-        }, (error) => {
+        })
+        .catch((error) => {
             // First generic/transport failure (not a Moodle exception, and
             // this was not already the bounded retry) gets exactly one later
             // page-load retry. A second generic failure, or any deterministic
             // Moodle/application outcome, remains guarded for the rest of the
             // session.
             persistRejectedOutcome(attemptKey, attempt.isRetry, error);
+            finishAttempt(attemptKey);
             Notification.exception(error);
-        })
-        .then(() => {
-            finishAttempt(attemptKey);
-        }, () => {
-            finishAttempt(attemptKey);
+
+            return null;
         });
 };
