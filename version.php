@@ -25,8 +25,8 @@
 defined('MOODLE_INTERNAL') || die();
 
 $plugin->component = 'local_autobrowsertimezone';
-$plugin->version = 2026082301;
-$plugin->release = '1.1.3';
+$plugin->version = 2026082500;
+$plugin->release = '1.1.4';
 $plugin->requires = 2024100700; // Moodle 4.5.
 $plugin->supported = [405, 502];
 $plugin->maturity = MATURITY_STABLE;
