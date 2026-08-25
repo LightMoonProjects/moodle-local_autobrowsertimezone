@@ -24,6 +24,10 @@
 import Ajax from 'core/ajax';
 import Notification from 'core/notification';
 
+// Prevent duplicate requests for the same mismatch within this loaded document
+// only; unlike sessionStorage, this disappears naturally on unload/navigation.
+const inFlight = new Set();
+
 /**
  * Resolve the browser's IANA timezone.
  *
@@ -44,34 +48,32 @@ const getBrowserTimezone = () => {
 /**
  * Per-mismatch sessionStorage attempt states.
  *
- * State machine (see docs/RETRY_GUARD_QA.md for the full manual QA mapping):
+ * Persisted state machine (see docs/RETRY_GUARD_QA.md for the full manual QA mapping):
  *
- *   (absent)  -- no attempt yet for this exact mismatch key; a request may be sent.
+ *   (absent)  -- no settled cross-page state yet for this exact mismatch key.
  *      |
- *      | beginAttempt() claims the key as GUARDED before the request is sent,
- *      | so a concurrent/duplicate init() for the same mismatch is blocked
- *      | immediately (no immediate retry, no request storm).
+ *      | inFlight claims the key only in this loaded document, so a duplicate
+ *      | init() cannot start a second concurrent request. No persistent
+ *      | sessionStorage state is written merely because a request started.
+ *      |
+ *      | request resolves successfully or becomes unchanged -> clear any
+ *      | prior retry marker (no further cross-page state required)
  *      v
- *   GUARDED ----------------------------------------------------------------+
- *      |                                                                    |
- *      | request resolves successfully                                     | request rejects with
- *      | (mismatch is resolved; the key is never consulted again)          | a Moodle `errorcode`
- *      |                                                                    | (deterministic outcome)
- *      v                                                                    v
- *   (moot)                                                              GUARDED
- *                                                                       (permanent for the
- *                                                                        rest of the session)
+ *   (absent)
  *
- *   GUARDED -- request rejects with NO `errorcode` (generic/transport failure) --> RETRY
+ *   (absent) -- request rejects with NO `errorcode` on a first attempt --> RETRY
  *
  *   RETRY -- a later page load calls init() again for the same mismatch -->
- *      beginAttempt() claims the key as GUARDED again (one retry spent) and sends
  *      exactly one more request:
  *        - resolves successfully -> (moot), as above;
  *        - rejects with an `errorcode` -> stays GUARDED (permanent);
+ *        - resolves with changed: false for a deterministic application
+ *          outcome such as authrejected/disabled -> GUARDED (permanent);
  *        - rejects again with no `errorcode` -> stays GUARDED (permanent) --
  *          the one-retry budget for this mismatch is now spent, so it will
- *          NOT be downgraded back to RETRY a second time.
+ *          NOT be downgraded back to RETRY a second time;
+ *        - unload/navigation before settlement -> remains RETRY, because no
+ *          persistent pre-request state is written or consumed.
  *
  * This bounds a persistent generic/transport failure (repeated proxy denial,
  * repeated HTTP 500, malformed response, etc.) to at most one retryable
@@ -111,7 +113,21 @@ const writeAttemptState = (key, state) => {
 };
 
 /**
- * Claim this exact mismatch for an attempt, if one is currently permitted.
+ * Remove any persisted attempt state for a mismatch key.
+ *
+ * @param {string} key Storage key.
+ * @returns {void}
+ */
+const clearAttemptState = (key) => {
+    try {
+        window.sessionStorage.removeItem(key);
+    } catch {
+        // Session storage may be unavailable; continue without the loop guard.
+    }
+};
+
+/**
+ * Start an in-flight attempt for this exact mismatch, if one is currently permitted.
  *
  * Legacy sessionStorage values ('1') from a previous plugin version are
  * treated the same as ATTEMPT_STATE_GUARDED: already permanently guarded.
@@ -128,23 +144,61 @@ const beginAttempt = (key) => {
         return null;
     }
 
-    const isRetry = state === ATTEMPT_STATE_RETRY;
+    if (inFlight.has(key)) {
+        return null;
+    }
 
-    // Claim the key up-front, before the request is sent, so a concurrent or
-    // duplicate call for the same mismatch cannot start a second request.
-    writeAttemptState(key, ATTEMPT_STATE_GUARDED);
+    const isRetry = state === ATTEMPT_STATE_RETRY;
+    inFlight.add(key);
 
     return {isRetry};
 };
 
 /**
- * Allow exactly one later retry for a mismatch that has not already spent
- * its one-time retry budget.
+ * Finish the in-flight attempt for this loaded document.
  *
  * @param {string} key Storage key.
  * @returns {void}
  */
-const allowOneRetry = (key) => {
+const finishAttempt = (key) => {
+    inFlight.delete(key);
+};
+
+/**
+ * Persist the settled outcome of a successful server response.
+ *
+ * changed:false results other than 'unchanged' are treated as deterministic
+ * application/policy outcomes under the current server contract, including
+ * 'authrejected' and 'disabled'. Those must remain guarded so they do not
+ * repeat on every later page load.
+ *
+ * @param {string} key Storage key.
+ * @param {Object} result Settled result returned by the external function.
+ * @returns {void}
+ */
+const persistSuccessfulOutcome = (key, result) => {
+    if (result.changed || result.reason === 'unchanged') {
+        clearAttemptState(key);
+        return;
+    }
+
+    writeAttemptState(key, ATTEMPT_STATE_GUARDED);
+};
+
+/**
+ * Persist the settled outcome of a rejected server response.
+ *
+ * @param {string} key Storage key.
+ * @param {boolean} isRetry Whether the rejected request was already the one bounded retry.
+ * @param {*} error The rejection reason from Ajax.call().
+ * @returns {void}
+ */
+const persistRejectedOutcome = (key, isRetry, error) => {
+    if (isPermanentServerOutcome(error) || isRetry) {
+        writeAttemptState(key, ATTEMPT_STATE_GUARDED);
+        return;
+    }
+
     writeAttemptState(key, ATTEMPT_STATE_RETRY);
 };
 
@@ -213,20 +267,25 @@ export const init = (config) => {
 
     Ajax.call([request])[0]
         .then((result) => {
+            persistSuccessfulOutcome(attemptKey, result);
+
             if (result.changed && safeConfig.reload) {
                 window.location.reload();
             }
+
             return result;
-        })
-        .catch((error) => {
-            if (!isPermanentServerOutcome(error) && !attempt.isRetry) {
-                // First generic/transport failure (not a Moodle exception,
-                // and this was not already a retry): allow exactly one later
-                // page load to retry this mismatch. A second generic failure,
-                // or any failure carrying a Moodle errorcode, leaves the
-                // mismatch guarded for the rest of the session.
-                allowOneRetry(attemptKey);
-            }
+        }, (error) => {
+            // First generic/transport failure (not a Moodle exception, and
+            // this was not already the bounded retry) gets exactly one later
+            // page-load retry. A second generic failure, or any deterministic
+            // Moodle/application outcome, remains guarded for the rest of the
+            // session.
+            persistRejectedOutcome(attemptKey, attempt.isRetry, error);
             Notification.exception(error);
+        })
+        .then(() => {
+            finishAttempt(attemptKey);
+        }, () => {
+            finishAttempt(attemptKey);
         });
 };

@@ -52,6 +52,11 @@ jobs:
         with:
           node-version: '22'
 
+      - name: JavaScript state-machine tests
+        if: ${{ !cancelled() }}
+        working-directory: plugin
+        run: node --test tests/js/timezone_test.mjs
+
       - name: Initialise Moodle Plugin CI
         run: |
           CI_DIR="$RUNNER_TEMP/moodle-plugin-ci"

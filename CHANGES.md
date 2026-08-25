@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.1.4 - 2026-08-25
+
+- Fixed: browser timezone synchronisation is no longer permanently suppressed
+  when a page unloads or a login redirect interrupts the timezone AJAX request
+  before it settles. `amd/src/timezone.js` no longer writes a persistent
+  `guarded` marker merely because a request started; same-document duplicate
+  prevention now uses a module-local in-memory `Set`, while `sessionStorage`
+  is updated only for settled cross-page outcomes.
+- Preserved Issue #5 bounded retry semantics with the new lifecycle-safe
+  state machine: a first generic transport failure persists `retry`, a second
+  generic failure persists `guarded`, deterministic Moodle rejections persist
+  `guarded`, and successful/unchanged outcomes clear any stale retry marker.
+  Under the current server contract, resolved `changed: false` outcomes other
+  than `unchanged` (including `reason: authrejected` and `reason: disabled`)
+  remain treated as deterministic guarded outcomes.
+- Added focused automated JavaScript regression coverage in
+  `tests/js/timezone_test.mjs` for pending in-flight duplicate suppression,
+  non-persistent pre-request state, bounded retry transitions, deterministic
+  rejection handling, and per-user guard isolation. Routine GitHub CI now runs
+  this test with `node --test`.
+- Regenerated `amd/build/timezone.min.js` and `amd/build/timezone.min.js.map`
+  from `amd/src/timezone.js`, updated `docs/RETRY_GUARD_QA.md` for unload,
+  rapid-navigation, session-expiry, duplicate-init, bounded-retry, and
+  cross-account scenarios, and raised `$plugin->release` from `1.1.3` to
+  `1.1.4` with `$plugin->version` from `2026082301` to `2026082500`.
+
 ## 1.1.3 - 2026-08-23
 
 - Fixed: the browser-side retry/loop guard in `amd/src/timezone.js` was keyed

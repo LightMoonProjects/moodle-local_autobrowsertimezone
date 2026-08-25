@@ -1,209 +1,224 @@
-# Timezone sync retry guard: manual QA procedure
+# Timezone sync retry guard: QA procedure
 
-This procedure verifies the `amd/src/timezone.js` retry-guard behaviour
-described in Issue #5. No automated JavaScript test harness exists in this
-repository (there is no `package.json`-based JS unit-test setup, and
-introducing one solely for this small AMD change would be disproportionate),
-so this documented manual procedure is the required evidence per the issue's
-acceptance criteria.
+This document records the required QA for the lifecycle-safe retry guard in
+`amd/src/timezone.js`.
 
-## State machine
+Focused automated regression coverage now exists in
+`tests/js/timezone_test.mjs` and is suitable for fast CLI verification with:
+
+```text
+node --test tests/js/timezone_test.mjs
+```
+
+Those automated tests cover the client-side state-machine branches that can
+be exercised without a real browser lifecycle. Real browser/manual QA is
+still required for unload/navigation and session-expiry redirect behaviour,
+because those depend on the document actually unloading or Moodle actually
+redirecting the tab.
+
+## State model
 
 Each browser/profile timezone mismatch, for the currently authenticated
-Moodle user, is tracked independently, keyed by
-`local_autobrowsertimezone:<user-id>:<current-profile-tz>:<browser-tz>` in
-`sessionStorage`. The `<user-id>` segment (Issue #18) prevents one account's
-guard/retry state from suppressing a different account's genuine mismatch
-after a logout/login in the same browser tab, since `sessionStorage` is
-scoped to the tab/origin, not to the authenticated account. The stored value
-is one of:
+Moodle user, is keyed by:
 
-- **(absent)** — no attempt has been made yet; a request may be sent.
-- **`guarded`** — this mismatch will not generate another request for the
-  rest of the browser session.
-- **`retry`** — a first generic/transport failure occurred; exactly one more
-  attempt is permitted on a later page load.
+```text
+local_autobrowsertimezone:<user-id>:<current-profile-tz>:<browser-tz>
+```
 
-Transitions:
+The `<user-id>` segment preserves Issue #18 isolation: one account's retry
+or guarded state must not suppress a different account in the same tab.
 
-1. **(absent) → `guarded`**, immediately, before the request is sent (this is
-   also what blocks a concurrent/duplicate call for the same mismatch).
-2. Request **succeeds** → state stays `guarded` (moot: the profile timezone
-   now matches the browser, so this exact key is never consulted again).
-3. Request **rejects with a Moodle `errorcode`** (a deterministic server
-   outcome — validation, authorisation, policy) → state stays `guarded`,
-   permanently, for the rest of the session.
-4. Request **rejects with no `errorcode`** (a generic/transport failure) on a
-   **first** attempt → state becomes `retry`.
-5. On a later page load, `retry` → `guarded` again (the retry is claimed),
-   and exactly one more request is sent:
-   - succeeds → moot, as in (2);
-   - rejects with an `errorcode` → stays `guarded` (permanent);
-   - rejects again with no `errorcode` → stays `guarded` (permanent — the
-     one-time retry budget for this mismatch is now spent; it is **not**
-     downgraded back to `retry` a second time).
+There are two distinct layers of state:
 
-This bounds a *persistent* generic/transport failure (repeated proxy denial,
-repeated HTTP 500, malformed/non-JSON response, repeated gateway failure,
-etc.) to at most one retryable attempt per mismatch per browser session,
-while a genuine one-off transient failure still gets exactly one later
-chance to succeed. No timer, recursion, or immediate re-call is used
-anywhere in this state machine; a transition to `retry` only takes effect on
-a subsequent, independent page load.
+- **Document-local `inFlight` set** — prevents duplicate concurrent requests
+  for the same mismatch inside the currently loaded document only. It is not
+  persisted and disappears naturally on unload/navigation.
+- **Persisted `sessionStorage` state** — records only settled cross-page
+  outcomes:
+  - **(absent)** — no settled failure state exists yet; a request may run.
+  - **`retry`** — a first generic/transport failure occurred; exactly one
+    later page load may retry.
+  - **`guarded`** — a deterministic outcome or a spent retry budget means the
+    mismatch must not be retried again in this tab session.
+
+Settled transitions:
+
+1. **No state + request starts**:
+   - `inFlight` claims the key in memory only.
+   - `sessionStorage` remains unchanged.
+2. **Success (`changed: true`)**:
+   - reload occurs at most once when enabled;
+   - any stale persisted `retry` marker is cleared.
+3. **Resolved no-op (`changed: false`, `reason: unchanged`)**:
+   - any stale persisted `retry` marker is cleared.
+4. **Resolved deterministic application outcome**:
+   - `changed: false`, `reason: authrejected` or `reason: disabled`
+   - persisted state becomes `guarded`.
+5. **Rejected Moodle/application exception**:
+   - rejection carries `errorcode`;
+   - persisted state becomes `guarded`.
+6. **First generic/transport rejection**:
+   - rejection has no Moodle `errorcode`;
+   - persisted state becomes `retry`.
+7. **Second generic/transport rejection**:
+   - the retry attempt rejects generically again;
+   - persisted state becomes `guarded`.
+8. **Unload/navigation before settlement**:
+   - no new persistent pre-request `guarded` state is written;
+   - a first attempt stays absent;
+   - a retry attempt stays `retry` until a settled outcome exists.
 
 ## Setup
 
-1. Enable the plugin (**Site administration → Plugins → Local plugins →
-   Automatic browser timezone**) with **Reload after timezone change**
-   enabled.
-2. Log in as a test user whose profile timezone differs from the browser's
-   IANA timezone (for example, set the profile to `Europe/London` while the
-   browser/OS reports `Australia/Sydney`).
-3. Open the browser's developer tools: Network tab (to inspect/control the
-   `local_autobrowsertimezone_update_timezone` AJAX call) and Console
-   (`sessionStorage` can also be inspected/edited from the Application/Storage
-   tab).
+1. Enable the plugin at **Site administration → Plugins → Local plugins →
+   Automatic browser timezone**.
+2. Enable **Reload after timezone change** for the scenarios below unless a
+   scenario explicitly says otherwise.
+3. Use a browser/OS reporting `Australia/Sydney`.
+4. Prepare test users whose Moodle profile timezone can be set to
+   `Asia/Tehran`, `99`, or another value as required.
+5. Open browser DevTools:
+   - **Network** tab for throttling/blocking/observing
+     `local_autobrowsertimezone_update_timezone`.
+   - **Application/Storage** tab or **Console** for inspecting
+     `sessionStorage`.
 
-## Scenario A — successful update
+## Scenario A — normal success
 
-1. Load any eligible page with a fresh session (clear `sessionStorage` for
-   the site first, or open a new private/incognito window).
-2. Expect exactly one `local_autobrowsertimezone_update_timezone` AJAX
-   request in the Network tab.
-3. Expect a `sessionStorage` key `local_autobrowsertimezone:<user-id>:<old-tz>:<new-tz>`
-   set to `guarded`.
-4. Expect the response `changed` to be `true` and the page to reload exactly
-   once.
-5. Reload the page again manually: expect **no** further AJAX request (the
-   profile timezone now matches the browser, so the mismatch no longer
-   exists).
+1. Use a fresh tab or clear `sessionStorage` for the Moodle origin.
+2. Set the test user's profile timezone to `Asia/Tehran`.
+3. Load an eligible page with the browser reporting `Australia/Sydney`.
+4. Expect exactly one AJAX request.
+5. Expect the request to complete with `changed: true` and the profile to
+   become `Australia/Sydney`.
+6. Expect the page to reload at most once.
+7. Reload the page manually afterwards: expect no further AJAX request
+   because the profile/browser mismatch is resolved.
 
-## Scenario B — first generic/transient AJAX failure
+## Scenario B — unload before request settles
 
-1. With a fresh session and the same mismatch as Scenario A, use DevTools to
-   simulate a failure for the AJAX request: either set the Network tab to
-   **Offline** immediately before the page fires the request, or use
-   **Block request URL** on `lib/ajax/service.php` for a single load, or
-   throttle/abort the request mid-flight.
-2. Expect the request to fail at the transport level (the browser console
-   shows Moodle's standard exception notification, sourced from
-   `core/notification`) — this rejection carries no Moodle `errorcode`.
-3. Inspect `sessionStorage`: the `local_autobrowsertimezone:<user-id>:<old-tz>:<new-tz>`
-   key must be set to `retry` — one later attempt is now permitted.
-4. Confirm no further request fires automatically on the same page (no
-   immediate retry, no request storm).
+1. Start from a genuine mismatch such as `Asia/Tehran` vs
+   `Australia/Sydney` with a fresh tab session.
+2. Use DevTools throttling or a breakpoint so the timezone AJAX request
+   remains pending.
+3. Before the request settles, navigate to another eligible Moodle page in
+   the same tab.
+4. Expect no stranded persistent `guarded` value for the mismatch key.
+   For a first attempt the key should remain absent; for a retry attempt it
+   should remain `retry`.
+5. On the next eligible page, expect another legitimate synchronization
+   opportunity for the same mismatch.
+6. Allow one of those later attempts to settle successfully and confirm the
+   profile eventually becomes `Australia/Sydney`.
 
-## Scenario C — successful later retry
+## Scenario C — rapid navigation
 
-1. Immediately following Scenario B, restore normal network connectivity
-   (remove the Offline/blocked-request condition).
-2. Reload the page (a later, independent page load in the same browser
-   session).
-3. Expect the AJAX request to fire again for the same mismatch (state was
-   `retry` after Scenario B).
-4. Expect a normal successful response and exactly one reload, as in
-   Scenario A.
+1. Keep the same genuine mismatch and slow the AJAX request significantly.
+2. Navigate repeatedly across eligible Moodle pages in the same tab before
+   each outstanding request settles.
+3. Confirm prior navigation does not poison later attempts with a permanent
+   pre-request `guarded` marker.
+4. Once one request is finally allowed to complete, confirm the profile
+   synchronizes and reload occurs at most once.
 
-## Scenario D — Moodle deterministic (`errorcode`) failure
+## Scenario D — session-expiry redirect
 
-1. With a fresh session, temporarily set the browser/OS timezone to a value
-   Moodle does not expose as a supported profile timezone (or, for a
-   deterministic repeatable test, temporarily edit
-   `classes/local/manager.php::is_supported_timezone()` in a local dev copy
-   to reject the current browser timezone — revert afterwards).
-2. Load the page: expect one AJAX request, which resolves as a **rejected**
-   promise carrying a Moodle exception (`errorcode: 'invalidparameter'`, from
-   `invalid_parameter_exception`).
-3. Inspect `sessionStorage`: the key **must remain `guarded`** — the
-   rejection carries a Moodle `errorcode`, so it is always treated as a
-   deterministic, permanent outcome regardless of whether this was a first
-   attempt or a retry.
-4. Reload the page one or more times: expect **no** further AJAX request for
-   the same mismatch while the state remains `guarded`.
+1. Start with a genuine mismatch and a session that is expired or about to
+   expire.
+2. Trigger the timezone request so Moodle responds with
+   `servicerequireslogin` and redirects the tab to login.
+3. Log back in in the same tab.
+4. Confirm `sessionStorage` did not gain a stranded permanent pre-request
+   `guarded` value merely because the request started.
+5. Load an eligible page again and confirm the mismatch remains eligible for
+   synchronization.
 
-## Scenario E — existing duplicate/concurrent guard (unchanged)
+## Scenario E — duplicate `init()` in one document
 
-`sessionStorage` is scoped to a single top-level browsing context (tab): two
-independently opened tabs each get their own storage area and are **not** a
-reliable way to demonstrate this guard. Reproduce it within one tab instead:
+`sessionStorage` is not the duplicate guard anymore; the duplicate guard is
+the in-memory `inFlight` set inside the loaded document.
 
-1. With a fresh session and a real mismatch, load the page once so the
-   `local_autobrowsertimezone/timezone` AMD module is present, but do this
-   step with the Network tab set to throttle/delay the request (or with a
-   breakpoint on the `Ajax.call` line) so the first request has not resolved
-   yet.
-2. While that first request is still pending, open the DevTools console in
-   the **same tab** and manually invoke the module a second time with the
-   same arguments it was originally called with, for example:
+1. With a fresh session and real mismatch, load an eligible page while
+   delaying the first AJAX request so it remains pending.
+2. In the same tab, manually invoke the AMD module a second time with the
+   same arguments, for example:
+
    ```js
    require(['local_autobrowsertimezone/timezone'], function(m) {
-       m.init({currentTimezone: '<old-tz>', reload: true, userid: <same-user-id>});
+       m.init({currentTimezone: 'Asia/Tehran', reload: true, userid: 123});
    });
    ```
-3. Expect at most one AJAX request in the Network tab for that exact
-   mismatch key — `beginAttempt()` claims the key as `guarded` synchronously
-   before the first request is sent, so the second, manually-triggered call
-   within the same tab observes the key already claimed and returns
-   immediately without sending a duplicate request.
 
-## Scenario F — persistent generic/transport failure (mandatory)
+3. Expect at most one concurrent AJAX request for that exact mismatch.
+4. Confirm no persistent `guarded` state was written solely because the first
+   request started.
 
-This is the scenario the retry-bounding fix specifically targets: a failure
-that keeps recurring (a persistently misconfigured reverse proxy/WAF, a
-repeated HTTP 500, a consistently malformed/non-JSON response, repeated
-gateway failures) must **not** generate a fresh AJAX request on every single
-page load forever.
+## Scenario F — first generic failure
 
-1. With a fresh session and a real mismatch, configure DevTools to make the
-   AJAX request fail generically on **every** load (for example, **Block
-   request URL** left enabled across multiple reloads, rather than removed
-   after one attempt as in Scenario B/C).
-2. **First page load:** expect one AJAX request, which fails generically (no
-   `errorcode`). Expect `sessionStorage` to be set to `retry`.
-3. **Second page load** (failure condition still active): expect exactly one
-   more AJAX request (the bounded retry being spent). It fails generically
-   again. Expect `sessionStorage` to now be `guarded`.
-4. **Third, fourth, and further page loads** (failure condition still
-   active): expect **no** further AJAX request at all — the mismatch is
-   permanently guarded for the rest of the browser session, exactly as a
-   deterministic Moodle `errorcode` failure would be.
-5. Confirm this holds across at least 3-4 additional reloads to demonstrate
-   the guard is not merely delayed but genuinely bounded.
+1. With a fresh tab session and a real mismatch, force a generic
+   transport/server failure without unloading the page:
+   - browser Offline mode,
+   - blocked `lib/ajax/service.php`,
+   - aborted request,
+   - or another failure that does not produce a Moodle `errorcode`.
+2. Expect one failed AJAX request and a standard Moodle exception
+   notification.
+3. Inspect `sessionStorage`: the mismatch key must become `retry`.
+4. Confirm the same page does not retry immediately.
+5. Reload or visit another eligible page in the same tab after restoring the
+   network/server path: expect exactly one later retry attempt.
 
-## Scenario G — guard state is isolated per Moodle account (Issue #18)
+## Scenario G — second generic failure
 
-This is the scenario the user-scoped guard key specifically targets: one
-account's guard/retry state must not suppress a different account's genuine
-mismatch in the same browser tab.
-
-1. Log in as **Account A**, with a profile timezone of `99` (Server
-   timezone) and a browser reporting `Australia/Sydney`.
-2. Load an eligible page: expect one AJAX request, resolving successfully.
-   Expect a `sessionStorage` key
-   `local_autobrowsertimezone:<A's user id>:99:Australia/Sydney` set to
+1. Starting from Scenario F's `retry` state, keep the generic failure active
+   for the next eligible page load as well.
+2. Expect exactly one more AJAX request for the same mismatch.
+3. Expect that second generic failure to change persisted state to
    `guarded`.
-3. Log out of Account A **in the same tab**, without closing it, then log in
-   as **Account B**, whose profile timezone is also `99`.
-4. Load an eligible page as Account B (same browser tab, same
-   `sessionStorage` area, same `99 -> Australia/Sydney` mismatch): expect a
-   **new** AJAX request to fire for Account B — the guard key now includes
-   `<B's user id>`, which is different from Account A's key, so Account A's
-   `guarded` entry is not consulted.
-5. Expect the response for Account B to resolve normally and follow the same
-   success/retry/permanent-failure semantics as Scenarios A-D, independently
-   of Account A's stored state.
-6. Confirm Account A's original key is still present and unaffected in
-   `sessionStorage` (it is simply a different, now-unused key; it is not
-   deleted or reset by Account B's activity).
+4. Continue loading additional eligible pages in the same tab: expect no
+   endless request stream.
 
-## Expected outcome summary
+## Scenario H — deterministic server rejection
 
-| Scenario | AJAX result | State after | Retried on next load? |
+1. With a fresh session, force a deterministic Moodle/application failure:
+   - unsupported browser timezone, or
+   - another reproducible server rejection carrying `errorcode`.
+2. Expect one AJAX request and a rejected promise with Moodle `errorcode`.
+3. Expect the mismatch key to persist as `guarded`.
+4. Reload additional eligible pages and confirm repeated requests are
+   suppressed.
+5. Also verify the resolved deterministic branch if practical:
+   `changed: false`, `reason: authrejected` must likewise remain guarded
+   under the current server contract.
+
+## Scenario I — cross-account isolation
+
+1. Log in as **Account A** in a fresh tab, with profile timezone `99` and
+   browser `Australia/Sydney`.
+2. Force either a successful synchronization or a guarded failure so Account
+   A leaves a persisted state for:
+
+   ```text
+   local_autobrowsertimezone:<A-user-id>:99:Australia/Sydney
+   ```
+
+3. Log out in the same tab and log in as **Account B**, also with profile
+   timezone `99`.
+4. Load an eligible page as Account B.
+5. Expect Account B to get its own synchronization attempt; Account A's key
+   must not suppress it.
+6. Confirm Account A's stored key, if any, remains untouched and separate.
+
+## Expected summary
+
+| Scenario | Result | Persisted state after settlement | Later pages retry? |
 |---|---|---|---|
-| A. Success | resolved, `changed: true` | `guarded` | no (mismatch resolved) |
-| B. First generic failure | rejected, no `errorcode` | `retry` | yes (this is C) |
-| C. Successful retry | resolved, `changed: true` | `guarded` | no (mismatch resolved) |
-| D. Moodle `errorcode` failure | rejected, `errorcode` set | `guarded` | no |
-| E. Concurrent load | guard blocks 2nd call | `guarded` by 1st call | n/a |
-| F. 2nd generic failure (persistent) | rejected, no `errorcode` | `guarded` | no (budget spent) |
-| G. Different account, same mismatch | resolved/rejected per that account's own outcome | independent per-user key | independent per-user key |
+| A. Normal success | resolved, `changed: true` | cleared/absent | no mismatch remains |
+| B. Unload before settlement | no settled promise | unchanged from pre-attempt state | yes, still eligible |
+| C. Rapid navigation | repeated unload before settlement | unchanged until one settles | yes, until settled |
+| D. Session-expiry redirect | redirect before settlement | unchanged from pre-attempt state | yes, after login |
+| E. Duplicate init in one document | 2nd call blocked by `inFlight` | no pre-request persistent state | n/a |
+| F. First generic failure | rejected, no `errorcode` | `retry` | yes, exactly once |
+| G. Second generic failure | rejected again, no `errorcode` | `guarded` | no |
+| H. Deterministic rejection | rejected with `errorcode`, or resolved deterministic `changed:false` | `guarded` | no |
+| I. Cross-account same-tab | per-account outcome only | keyed by `<user-id>` | independent per user |
